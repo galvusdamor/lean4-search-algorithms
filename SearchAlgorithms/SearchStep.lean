@@ -1,4 +1,4 @@
-import Graphlib.SearchAlgorithm
+import SearchAlgorithms.SearchAlgorithm
 
 
 section

@@ -1,5 +1,5 @@
-import Graphlib.NatGraph
-import Graphlib.SearchStep
+import SearchAlgorithms.NatGraph
+import SearchAlgorithms.SearchStep
 
 -- def local global variable for a graph
 variable {V : Type} [FinEnum V] [DecidableEq V]

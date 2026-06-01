@@ -3,8 +3,8 @@ import Mathlib.Data.FinEnum
 import Mathlib.Data.Finset.Empty
 import Mathlib.Data.List.MinMax
 
-import Graphlib.FinEnum
-import Graphlib.SearchState
+import SearchAlgorithms.FinEnum
+import SearchAlgorithms.SearchState
 
 namespace WeightedDiGraph
 

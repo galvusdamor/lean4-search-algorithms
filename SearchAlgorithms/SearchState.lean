@@ -1,4 +1,4 @@
-import Graphlib.Basic
+import SearchAlgorithms.Basic
 import Init.SizeOf
 import Mathlib.Data.Prod.Lex
 import Mathlib.Order.Basic

@@ -1,5 +1,5 @@
 -- Dijkstra is a special case of A' -- when h = 0
-import Graphlib.HeuristicSearch
+import SearchAlgorithms.HeuristicSearch
 
 -- def local global variable for a graph
 variable {V : Type} [FinEnum V] [DecidableEq V]

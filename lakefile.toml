@@ -1,20 +1,12 @@
-name = "graphlib"
+name = "SearchAlgorithms"
 version = "0.1.0"
-defaultTargets = ["Graphlib", "planner"]
+defaultTargets = ["SearchAlgorithms"]
 
 [[lean_lib]]
-name = "Graphlib"
+name = "SearchAlgorithms"
 
 [[require]]
 name = "mathlib"
 scope = "leanprover-community"
 rev = "v4.27.0"
 
-[[require]]
-name = "unplanvalidator"
-git = "https://github.com/AmosNico/validator"
-rev = "main"
-
-[[lean_exe]]
-name = "planner"
-root = "Planner.Main"

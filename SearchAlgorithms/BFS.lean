@@ -1,4 +1,4 @@
-import Graphlib.SearchStep
+import SearchAlgorithms.SearchStep
 
 -- def local global variable for a graph
 variable {V : Type} {E : Type} [FinEnum V] [DecidableEq V]

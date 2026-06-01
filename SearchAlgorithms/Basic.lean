@@ -5,7 +5,7 @@ import Mathlib.Data.Bool.AllAny
 import Mathlib.Data.FinEnum
 import Init.Data.List.Basic
 
-import Graphlib.Lists
+import SearchAlgorithms.Lists
 
 /-!
 # Weighted Digraphs

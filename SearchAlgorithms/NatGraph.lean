@@ -1,5 +1,5 @@
-import Graphlib.Basic
-import Graphlib.FinEnum
+import SearchAlgorithms.Basic
+import SearchAlgorithms.FinEnum
 
 
 def NatGraph (V : Type) [FinEnum V] : Type := WeightedDiGraph V ℕ

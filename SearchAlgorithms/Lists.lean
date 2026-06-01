@@ -2,7 +2,7 @@ import Mathlib.Algebra.Order.Group.Nat
 import Mathlib.Combinatorics.Digraph.Basic
 import Mathlib.Data.Bool.AllAny
 import Mathlib.Data.FinEnum
-import Graphlib.WF
+import SearchAlgorithms.WF
 
 -- theorems for `List.Pairwise`. Needed for extension of Paths with new edges, due to need to modify Nodup proofs.
 theorem pairwise_add_anywhere {α: Type} {pr: α → α → Prop} {l1 l2 : List α} {symm: Symmetric pr} {a : α}:
