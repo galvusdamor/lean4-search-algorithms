@@ -213,7 +213,7 @@ lemma hsearch_expand_metric_reduction : WeightedDiGraph.termination_proof_for_ex
     unfold WeightedDiGraph.termination_proof_for_expand
     intro state head tail ⟨head_ne_goal,compose⟩
     unfold WellFoundedRelation.rel
-    unfold instWellFoundedRelationProdVectorWithTopNat_graphlib
+    unfold instWellFoundedRelationProdVectorWithTopNat_searchAlgorithms
     apply Prod.lex_iff.mpr
     apply (Classical.or_iff_not_imp_left).mpr
     contrapose
