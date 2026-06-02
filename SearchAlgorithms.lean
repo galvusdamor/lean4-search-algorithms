@@ -12,5 +12,4 @@ import SearchAlgorithms.NatGraph
 import SearchAlgorithms.SearchAlgorithm
 import SearchAlgorithms.SearchState
 import SearchAlgorithms.SearchStep
-import SearchAlgorithms.temp
 import SearchAlgorithms.WF
