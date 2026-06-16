@@ -18,6 +18,9 @@ abbrev search_step_function (G : WeightedDiGraph V E) (D : Type) [FValueComp D] 
 variable {G : WeightedDiGraph V E}
 variable {D : Type} [FValueComp D]
 variable {T : Type} [WellFoundedRelation T]
+-- Predicate describing which neighbours the search actually expands into.
+-- `expandable := fun _ => True` recovers the classical "visit all neighbours" behaviour.
+variable {expandable : V → Prop}
 
 
 def extract_path_to (start : V) (goal : V) (search_state : base_search_state G D)
@@ -127,16 +130,24 @@ theorem search_termination_with_empty_stack_implies_goal_visited (start : V) (go
   (final_state : base_search_state G D)
   (f_visited : f ∈ final_state.visited)
   (final_stack_empty : final_state.stack = [])
-  (on_stack_or_all_nei_visited : search_invar_on_stack_or_all_neighbours_visited final_state): goal ∈ final_state.visited := by
+  (walk_expandable : ∀ v ∈ theWalk.support, expandable v)
+  (on_stack_or_all_nei_visited : search_invar_on_stack_or_all_neighbours_visited expandable final_state): goal ∈ final_state.visited := by
     cases theWalk
     · exact f_visited
     · next nextNode adj rest_walk =>
+      have rest_sub : ∀ v ∈ rest_walk.support, v ∈ (Walk.cons adj rest_walk).support := by
+        intro v hv
+        unfold Walk.support; simp only [List.mem_cons]; right; exact hv
+      have nextNode_in : nextNode ∈ (Walk.cons adj rest_walk).support :=
+        rest_sub nextNode (Walk.start_in_support rest_walk)
       apply search_termination_with_empty_stack_implies_goal_visited start goal nextNode rest_walk
       · unfold search_invar_on_stack_or_all_neighbours_visited at on_stack_or_all_nei_visited
         rw [final_stack_empty] at on_stack_or_all_nei_visited
         simp at on_stack_or_all_nei_visited
-        apply on_stack_or_all_nei_visited f f_visited nextNode adj
+        exact on_stack_or_all_nei_visited f f_visited nextNode adj (walk_expandable nextNode nextNode_in)
       · exact final_stack_empty
+      · intro v hv
+        exact walk_expandable v (rest_sub v hv)
       · exact on_stack_or_all_nei_visited
 
 lemma support_of_path_visited (u v : V) (w : G.Walk u v)
@@ -188,7 +199,8 @@ lemma run_walk_through_state_not_on_stack_yields_all_visited
   (w_support_nodup : w.support.Nodup)
   (state : base_search_state G D)
   (start_visited : search_invar_start_visited start state)
-  (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited state)
+  (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited expandable state)
+  (walk_expandable : ∀ u ∈ w.support, expandable u)
   (all_not_on_stack : ∀ u ∈ w.support, u ∈ state.stack → u = v)
   :
   ∀ u ∈ w.support, u ∈ state.visited := by
@@ -199,6 +211,12 @@ lemma run_walk_through_state_not_on_stack_yields_all_visited
       apply start_visited
     · -- walk is: start -> w -> ... -> v (with potentially w = v)
       next w start_adj_w w' =>
+      have w_in_support : w ∈ (Walk.cons start_adj_w w').support := by
+        unfold Walk.support; simp only [List.mem_cons]; right
+        exact Walk.start_in_support w'
+      have expandable_w : expandable w := walk_expandable w w_in_support
+      have w'_sub : ∀ u ∈ w'.support, u ∈ (Walk.cons start_adj_w w').support := by
+        intro u hu; unfold Walk.support; simp only [List.mem_cons]; right; exact hu
       intro u u_in_support_w
       unfold Walk.support at u_in_support_w
       simp at u_in_support_w
@@ -225,9 +243,10 @@ lemma run_walk_through_state_not_on_stack_yields_all_visited
                   exact hh
               grind
             · next hh =>
-              apply hh
-              exact start_adj_w
+              exact hh w start_adj_w expandable_w
           · exact on_stack_or_nei_visited
+          · intro u' u'_in_support_w'
+            exact walk_expandable u' (w'_sub u' u'_in_support_w')
           · intro u' u'_in_support_w' u'_in_stack
             apply all_not_on_stack
             · simp_all!
@@ -248,8 +267,7 @@ lemma run_walk_through_state_not_on_stack_yields_all_visited
           · next start_in_stack =>
             simp_all
           · next all_start_nei_visited =>
-            apply all_start_nei_visited
-            exact start_adj_w
+            exact all_start_nei_visited w start_adj_w expandable_w
 
 lemma path_has_earliest_node_on_stack (start v : V) [DecidableEq V] (p : G.Path start v)
     (state : base_search_state G D) :
@@ -285,7 +303,8 @@ lemma path_has_earliest_node_on_stack (start v : V) [DecidableEq V] (p : G.Path 
 lemma run_path_through_state_yields_node_on_stack_or_all_visited_temp (start v : V)
     (v_ne_start : v ≠ start) (p : G.Path start v) (state : base_search_state G D)
     (start_visited : search_invar_start_visited start state)
-    (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited state)
+    (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited expandable state)
+    (path_expandable : ∀ u ∈ p.support, expandable u)
     : (∃ u ∈ p.support, u ∈ state.stack ∧ u ≠ v)
     ∨ (v ∈ state.visited ∧ ∀ u ∈ p.support, u ≠ v → u ∉ state.stack ∧ u ∈ state.visited) := by
   by_cases no_onstack : (∃ u ∈ p.support, u ∈ state.stack ∧ u ≠ v)
@@ -297,15 +316,15 @@ lemma run_path_through_state_yields_node_on_stack_or_all_visited_temp (start v :
       have h := no_onstack u u_in_support u_on_stack
       contradiction
     constructor
-    · apply run_walk_through_state_not_on_stack_yields_all_visited start v v_ne_start p p.prop
-        state start_visited on_stack_or_nei_visited (by grind) _ (Walk.goal_in_support _)
+    · apply run_walk_through_state_not_on_stack_yields_all_visited start v v_ne_start p.val p.prop
+        state start_visited on_stack_or_nei_visited (fun u hu => path_expandable u hu) (by grind) _ (Walk.goal_in_support _)
     · intro u u_insupport u_neq_v
       constructor
       · apply none_on_stack
         · exact u_insupport
         · exact u_neq_v
-      · apply run_walk_through_state_not_on_stack_yields_all_visited start v v_ne_start p p.prop
-          state start_visited on_stack_or_nei_visited (by grind) _ u_insupport
+      · apply run_walk_through_state_not_on_stack_yields_all_visited start v v_ne_start p.val p.prop
+          state start_visited on_stack_or_nei_visited (fun u hu => path_expandable u hu) (by grind) _ u_insupport
 
 lemma run_path_through_state_yields_node_on_stack_or_all_visited
   [DecidableEq V]
@@ -313,11 +332,13 @@ lemma run_path_through_state_yields_node_on_stack_or_all_visited
   (p : G.Path start v)
   (state : base_search_state G D)
   (start_visited : search_invar_start_visited start state)
-  (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited state)
+  (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited expandable state)
+  (path_expandable : ∀ u ∈ p.support, expandable u)
   :
   (∃ u ∈ p.support, u ∈ state.stack ∧ u ≠ v ∧ (p.support.takeWhile (· ≠ u)).all (· ∉ state.stack)) ∨
     (v ∈ state.visited ∧ ∀ u ∈ p.support, u ≠ v → u ∉ state.stack ∧ u ∈ state.visited) := by
-    have h : (∃ u ∈ p.support, u ∈ state.stack ∧ u ≠ v) ∨ (v ∈ state.visited ∧ ∀ u ∈ p.support, u ≠ v → u ∉ state.stack ∧ u ∈ state.visited) := by apply run_path_through_state_yields_node_on_stack_or_all_visited_temp <;> simp_all
+    have h : (∃ u ∈ p.support, u ∈ state.stack ∧ u ≠ v) ∨ (v ∈ state.visited ∧ ∀ u ∈ p.support, u ≠ v → u ∉ state.stack ∧ u ∈ state.visited) := by
+      apply run_path_through_state_yields_node_on_stack_or_all_visited_temp start v v_ne_start p state start_visited on_stack_or_nei_visited path_expandable
 
     cases h
     · next h =>
@@ -648,12 +669,12 @@ lemma search_goal_on_stack_if_returned_true
 
 section
 variable (start_is_base_init : (has_base_search_state.to_base_state (G:=G) (D:=D) start_state) = (base_search_state_initial start d))
-variable (invar_carries_over_step : base_invar_carries_over_step search_step (goal:=goal) (search_invar_all_basic start))
+variable (invar_carries_over_step : base_invar_carries_over_step search_step (goal:=goal) (search_invar_all_basic expandable start))
 include start_is_base_init invar_carries_over_step
 
 
 lemma search_returns_with_invariants :
-    search_invar_all_basic start (has_base_search_state.to_base_state (G:=G) (D:=D) (search_internal (start_state:=start_state) decreasing_proof).1) := by
+    search_invar_all_basic expandable start (has_base_search_state.to_base_state (G:=G) (D:=D) (search_internal (start_state:=start_state) decreasing_proof).1) := by
     unfold search_internal
     apply search_recurse_lift_base_invariant
     constructor
@@ -707,7 +728,7 @@ lemma search_returns_with_start_visited:
     exact all_invars.2.2.2.2.2
 
 lemma search_returns_with_node_on_stack_or_all_neighbours_visited:
-    search_invar_on_stack_or_all_neighbours_visited (has_base_search_state.to_base_state (G:=G) (D:=D) (search_internal (start_state:=start_state) decreasing_proof).1) := by
+    search_invar_on_stack_or_all_neighbours_visited expandable (has_base_search_state.to_base_state (G:=G) (D:=D) (search_internal (start_state:=start_state) decreasing_proof).1) := by
     have all_invars := search_returns_with_invariants decreasing_proof start_is_base_init invar_carries_over_step
     unfold search_invar_all_basic at all_invars
     exact all_invars.2.2.2.2.1
@@ -834,7 +855,7 @@ lemma search_not_visited_goal_if_returned_false
 
 
 section
-variable (invar_carries_over_step : base_invar_carries_over_step search_step (goal:=goal) (search_invar_all_basic start))
+variable (invar_carries_over_step : base_invar_carries_over_step search_step (goal:=goal) (search_invar_all_basic expandable start))
 include invar_carries_over_step
 
 theorem search_is_complete
@@ -844,18 +865,18 @@ theorem search_is_complete
 ----
     (step_terminates_if_goal_is_stack_head : search_step_terminates_when_goal_stack_head (search_step:=search_step) (goal:=goal) (start_state:=start_state))
     :
-    ((∃ x : (G.Path start goal), x = x) → Option.isSome (search_exe decreasing_proof start_is_base_init invar_carries_over_step goal_on_stack_if_terminated)) := by
-    -- or Option.isNone (dfs g start goal) → ∄ x (Path g start goal), x = x
+    ((∃ p : (G.Path start goal), ∀ u ∈ p.support, expandable u) → Option.isSome (search_exe decreasing_proof start_is_base_init invar_carries_over_step goal_on_stack_if_terminated)) := by
+    -- or Option.isNone (dfs g start goal) → ∄ x (Path g start goal) with expandable support
       intro path_exists
       apply Exists.elim path_exists
-      intro thePath a; clear a-- uninformativ x=X
+      intro thePath path_expandable
 
       let final := search_internal (start_state:=start_state) decreasing_proof
       let final_state : base_search_state G D := has_base_search_state.to_base_state final.1
 
       have start_visited : search_invar_start_visited start final_state :=
         search_returns_with_start_visited decreasing_proof start_is_base_init invar_carries_over_step
-      have on_stack_or_all_nei_visited : search_invar_on_stack_or_all_neighbours_visited final_state:=
+      have on_stack_or_all_nei_visited : search_invar_on_stack_or_all_neighbours_visited expandable final_state:=
         search_returns_with_node_on_stack_or_all_neighbours_visited decreasing_proof start_is_base_init invar_carries_over_step
 
       by_contra terminates_with_none
@@ -875,8 +896,9 @@ theorem search_is_complete
       have goal_not_visited : goal ∉ final_state.visited := --
         search_not_visited_goal_if_returned_false decreasing_proof stack_empty_if_terminated_without_goal start_is_base_init step_terminates_if_goal_is_stack_head keeps_goal_on_stack goal_becomes_visited_implies_on_stack search_returned_false
 
+      have walk_expandable : ∀ v ∈ thePath.val.support, expandable v := path_expandable
       obtain ⟨theWalk, nodupe ⟩ := thePath
-      have goal_in_final := search_termination_with_empty_stack_implies_goal_visited start goal start theWalk final_state start_visited final_stack_empty on_stack_or_all_nei_visited
+      have goal_in_final := search_termination_with_empty_stack_implies_goal_visited start goal start theWalk final_state start_visited final_stack_empty walk_expandable on_stack_or_all_nei_visited
       contradiction
 
 
@@ -887,7 +909,7 @@ theorem search_is_complete_inv
 ----
     (step_terminates_if_goal_is_stack_head : search_step_terminates_when_goal_stack_head (search_step:=search_step) (goal:=goal) (start_state:=start_state))
     :
-    Option.isNone (search_exe decreasing_proof start_is_base_init invar_carries_over_step goal_on_stack_if_terminated) → ¬ ∃ x : (G.Path start goal), x = x := by
+    Option.isNone (search_exe decreasing_proof start_is_base_init invar_carries_over_step goal_on_stack_if_terminated) → ¬ ∃ p : (G.Path start goal), ∀ u ∈ p.support, expandable u := by
       intro optionIsNone
       by_contra pathExists
       have isSome := search_is_complete decreasing_proof stack_empty_if_terminated_without_goal start_is_base_init invar_carries_over_step goal_on_stack_if_terminated keeps_goal_on_stack goal_becomes_visited_implies_on_stack step_terminates_if_goal_is_stack_head

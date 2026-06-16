@@ -20,6 +20,7 @@ variable {D : Type} [FValueComp D]
 variable {T : Type} [WellFoundedRelation T]
 variable {G : WeightedDiGraph V E}
 variable {start : V}
+variable {expandable : V → Prop}
 variable [G.has_base_search_state D state_type]
 
 section
@@ -239,7 +240,7 @@ section
 
 def search_exe_with_stack_step
     (metric_for_expand_proof : termination_proof_for_expand expand goal termination_metric)
-    (invar_carries : base_invar_carries_over_expand expand goal (search_invar_all_basic start))
+    (invar_carries : base_invar_carries_over_expand expand goal (search_invar_all_basic expandable start))
     (start_is_base_init : (has_base_search_state.to_base_state (G:=G) (D:=D) start_state) = (base_search_state_initial start d))
     :
     Option (G.Path start goal) :=
@@ -252,7 +253,7 @@ def search_exe_with_stack_step
       intro st goal
       apply search_stack_step_goal_on_stack_if_terminated
 
-    let base_invars_carry : base_invar_carries_over_step step (search_invar_all_basic start) := by
+    let base_invars_carry : base_invar_carries_over_step step (search_invar_all_basic expandable start) := by
       apply base_invar_carries_over_stack_step
       exact invar_carries
 
@@ -275,7 +276,7 @@ def search_with_stack_step
 
 theorem search_with_stack_step_is_sound
     (metric_for_expand_proof : termination_proof_for_expand expand goal termination_metric)
-    (invar_carries : base_invar_carries_over_expand expand goal (search_invar_all_basic start))
+    (invar_carries : base_invar_carries_over_expand expand goal (search_invar_all_basic expandable start))
     (start_is_base_init : (has_base_search_state.to_base_state (G:=G) (D:=D) start_state) = (base_search_state_initial start d))
     :
     (Option.isSome (search_exe_with_stack_step expand goal metric_for_expand_proof invar_carries start_is_base_init) → (∃ x : (G.Path start goal), x = x)) := by
@@ -289,12 +290,12 @@ theorem search_with_stack_step_is_sound
 
 theorem search_with_stack_step_is_complete
     (metric_for_expand_proof : termination_proof_for_expand expand goal termination_metric)
-    (invar_carries : base_invar_carries_over_expand expand goal (search_invar_all_basic start))
+    (invar_carries : base_invar_carries_over_expand expand goal (search_invar_all_basic expandable start))
     (start_is_base_init : (has_base_search_state.to_base_state (G:=G) (D:=D) start_state) = (base_search_state_initial start d))
     (goal_on_stack_carries_expand : base_invar_carries_over_expand expand goal (search_prop_goal_on_stack goal))
     (goal_trigger : goal_becomes_visited_puts_it_on_stack expand goal)
     :
-    ((∃ x : (G.Path start goal), x = x) → Option.isSome (search_exe_with_stack_step expand goal metric_for_expand_proof invar_carries start_is_base_init)) := by
+    ((∃ p : (G.Path start goal), ∀ u ∈ p.support, expandable u) → Option.isSome (search_exe_with_stack_step expand goal metric_for_expand_proof invar_carries start_is_base_init)) := by
     intro path
     unfold search_exe_with_stack_step
     simp

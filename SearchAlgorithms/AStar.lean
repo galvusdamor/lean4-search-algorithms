@@ -1,4 +1,5 @@
 import SearchAlgorithms.HeuristicSearch
+import Mathlib
 
 -- def local global variable for a graph
 variable {V : Type} [FinEnum V]
@@ -8,41 +9,47 @@ namespace NatGraph
 
 open WeightedDiGraph
 
-/-- a heuristic is admissible iff for all nodes, the true cost is greater or equal to the heuristic --/
-abbrev admissible (heur : V → ℕ) (goal : V) :=
-  ∀ v : V, g.cost_ge v goal (heur v)
+/-- a heuristic is admissible iff for all nodes, the true cost is greater or equal to the heuristic.
+With an `ℕ∞`-valued heuristic, `heur v = ⊤` is admissible exactly when there is no path from `v`
+to the goal (no finite path cost can dominate `⊤`). --/
+abbrev admissible (heur : V → ℕ∞) (goal : V) :=
+  ∀ v : V, ∀ p : g.Path v goal, heur v ≤ (p.cost : ℕ∞)
 
-abbrev admissible' (heur : V → ℕ) (goals : List V) :=
-  ∀ v : V, ∀ goal ∈ goals, g.cost_ge v goal (heur v)
+abbrev admissible' (heur : V → ℕ∞) (goals : List V) :=
+  ∀ v : V, ∀ goal ∈ goals, ∀ p : g.Path v goal, heur v ≤ (p.cost : ℕ∞)
 
-abbrev goal_aware (heur : V → ℕ) (goal : V) := heur goal = 0
+abbrev goal_aware (heur : V → ℕ∞) (goal : V) := heur goal = 0
 
-abbrev goal_aware' (heur : V → ℕ) (goals : List V) := ∀ goal ∈ goals, heur goal = 0
+abbrev goal_aware' (heur : V → ℕ∞) (goals : List V) := ∀ goal ∈ goals, heur goal = 0
 
-abbrev consistent (heur : V → ℕ) :=
-  ∀ v : V, ∀ w : V, ∀ adj : g.Adj v w, (heur v) ≤ (heur w) + g.edgeCost adj
+abbrev consistent (heur : V → ℕ∞) :=
+  ∀ v : V, ∀ w : V, ∀ adj : g.Adj v w, (heur v) ≤ (heur w) + (g.edgeCost adj : ℕ∞)
 
-private lemma walk_cost_ge_heur (heur : V → ℕ) (goal : V)
+private lemma walk_cost_ge_heur (heur : V → ℕ∞) (goal : V)
     (ga : goal_aware heur goal) (hcons : consistent (g:=g) heur)
-    {v : V} (w : g.Walk v goal) : w.cost ≥ heur v := by
+    {v : V} (w : g.Walk v goal) : heur v ≤ (w.cost : ℕ∞) := by
   induction w with
   | nil => simp [Walk.cost, ga]
   | cons adj rest ih =>
     have ih' := ih ga
-    calc heur _ ≤ heur _ + g.edgeCost adj := hcons _ _ adj
-      _ ≤ rest.cost + g.edgeCost adj := Nat.add_le_add_right ih' _
-      _ = g.edgeCost adj + rest.cost := Nat.add_comm _ _
-lemma admissible_of_goal_aware_consistent (heur : V → ℕ) (goal : V) :
+    have hcost : ((Walk.cons adj rest).cost : ℕ∞) = (g.edgeCost adj : ℕ∞) + (rest.cost : ℕ∞) := by
+      have hnat : (Walk.cons adj rest).cost = g.edgeCost adj + rest.cost := rfl
+      rw [hnat]; push_cast; ring
+    rw [hcost]
+    calc heur _ ≤ heur _ + (g.edgeCost adj : ℕ∞) := hcons _ _ adj
+      _ ≤ (rest.cost : ℕ∞) + (g.edgeCost adj : ℕ∞) := by gcongr
+      _ = (g.edgeCost adj : ℕ∞) + (rest.cost : ℕ∞) := add_comm _ _
+lemma admissible_of_goal_aware_consistent (heur : V → ℕ∞) (goal : V) :
     goal_aware heur goal ∧ consistent (g:=g) heur → admissible (g:=g) heur goal := by
   intro ⟨ga, cons⟩ v p
   exact walk_cost_ge_heur heur goal ga cons p.val
 
-lemma admissible'_of_goal_aware_consistent (heur : V → ℕ) (goals : List V) :
+lemma admissible'_of_goal_aware_consistent (heur : V → ℕ∞) (goals : List V) :
     goal_aware' heur goals ∧ consistent (g:=g) heur → admissible' (g:=g) heur goals := by
   intro ⟨ga, cons⟩ v goal goal_in_goals p
   exact walk_cost_ge_heur heur goal (ga goal goal_in_goals) cons p.val
 
-variable (heur : V → ℕ)
+variable (heur : V → ℕ∞)
 
 /-- The A* algorithm, defined via `WeightedDiGraph.search_exe_with_stack_step`. -/
 def astar (start : V) (goal : V): Option (g.Path start goal) :=
@@ -61,9 +68,14 @@ theorem astar_is_sound (start : V) (goal : V) :
   · apply hsearch_expand_keeps_base_invars
   · rfl
 
+/-- A* is complete: if there is a path from `start` to `goal` all of whose nodes
+have a *finite* heuristic value (i.e. none is disregarded because the heuristic
+estimates an infinite distance), then A* finds a path.  The expandability
+hypothesis is necessary: nodes with `heur v = ⊤` are never inserted into the
+queue, so a path passing through such a node need not be discovered. -/
 theorem astar_is_complete (start : V) (goal : V):
-    ((∃ x : (g.Path start goal), x = x) → Option.isSome (astar (g:=g) heur start goal)) := by
-  apply WeightedDiGraph.search_with_stack_step_is_complete
+    ((∃ p : (g.Path start goal), ∀ u ∈ p.support, hsearch_expandable heur u) → Option.isSome (astar (g:=g) heur start goal)) := by
+  apply WeightedDiGraph.search_with_stack_step_is_complete (expandable := hsearch_expandable heur)
   · apply hsearch_expand_metric_reduction
   · apply hsearch_expand_keeps_base_invars
   · rfl
@@ -89,22 +101,23 @@ abbrev node_closed (s : WeightedDiGraph.base_search_state g (ℕ×ℕ)) (v : V) 
     there is an open node v' on p for which its current known distance from start is the optimum. -/
 abbrev astar_invar (start : V) (s : WeightedDiGraph.base_search_state g (ℕ×ℕ)) :=
   ∀ v : V, ¬ (node_closed s v) → ∀ p : g.Path start v, p.is_cheapest →
+    (∀ u ∈ p.support, hsearch_expandable heur u) →
     ∃ v' ∈ p.support, (node_open s v') ∧ g.cost_is start v' (s.pathOrder v').1
 
 abbrev astar_path_invar (start : V) (goal : V) (s : WeightedDiGraph.base_search_state g (ℕ×ℕ)) :=
   --∀ p : g.Path start goal, p.is_cheapest → ∃ v' ∈ p.support, (node_open s v')
-  ∀ p : g.Path start goal, ∃ v' ∈ p.support, (node_open s v')
+  ∀ p : g.Path start goal, (∀ u ∈ p.support, hsearch_expandable heur u) → ∃ v' ∈ p.support, (node_open s v')
 
 abbrev astar_goal_invar (goal : V) (s : WeightedDiGraph.base_search_state g (ℕ×ℕ)) :=
   goal ∈ s.visited → goal ∈ s.stack
 
 
 lemma astar_invar_holds_at_init (start : V):
-  astar_invar start (WeightedDiGraph.base_search_state_initial (G:=g) start (0,0)) := by
+  astar_invar heur start (WeightedDiGraph.base_search_state_initial (G:=g) start (0,0)) := by
   unfold astar_invar
   unfold WeightedDiGraph.base_search_state_initial
   simp_all
-  intro v a nodup cheapest
+  intro v a nodup cheapest _expandable
   use start
   constructor
   · simp
@@ -172,8 +185,9 @@ lemma astar_expand_keeps_goal_invar (goal : V)
 
 lemma astar_expand_path_one_on_stack {head : V} {tail : List V} (goal v : V) (v_goal : g.Walk v goal) (v_visited : v ∈ state.visited) (v_not_on_stack : v ∉ state.stack)
   (stack_compose : state.stack = head :: tail)
-  (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited state)
+  (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited (hsearch_expandable heur) state)
   (goal_invar : astar_goal_invar goal state)
+  (walk_expandable : ∀ u ∈ v_goal.support, hsearch_expandable heur u)
   (head_not_mem_v_goal : head ∉ v_goal.support)
   :
   ∃ v' ∈ v_goal.support, v' ∈ (hsearch_step_expand heur state head tail).stack := by
@@ -181,6 +195,15 @@ lemma astar_expand_path_one_on_stack {head : V} {tail : List V} (goal v : V) (v_
     · apply goal_invar at v_visited
       apply absurd v_visited v_not_on_stack
     case cons w adj_v_w w_goal =>
+      have w_goal_expandable : ∀ u ∈ w_goal.support, hsearch_expandable heur u := by
+        intro u hu
+        apply walk_expandable
+        rw [compose, Walk.support_cons]
+        exact List.mem_cons_of_mem _ hu
+      have w_expandable : hsearch_expandable heur w := by
+        apply walk_expandable
+        rw [compose, Walk.support_cons]
+        exact List.mem_cons_of_mem _ (Walk.start_in_support w_goal)
       have w_visited : w ∈ state.visited := by
         specialize on_stack_or_nei_visited ⟨ v, v_visited ⟩
         grind
@@ -220,19 +243,19 @@ lemma astar_expand_path_one_on_stack {head : V} {tail : List V} (goal v : V) (v_
 
 
 lemma astar_expand_keeps_path_invar {start : V} (goal : V)
-  (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited state)
+  (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited (hsearch_expandable heur) state)
   (goal_invar : astar_goal_invar goal state)
   (stack_visited : search_invar_stack_is_visited state)
     :
      ∀ head : V, ∀ tail : List V,
-        astar_path_invar start goal state
+        astar_path_invar heur start goal state
           ∧ head ≠ goal
           ∧ state.stack = head :: tail
-        → astar_path_invar start goal (hsearch_step_expand heur state head tail) := by
+        → astar_path_invar heur start goal (hsearch_step_expand heur state head tail) := by
     intro head tail ⟨ prior_invar, head_ne_goal, stack_compose ⟩
     unfold astar_path_invar at prior_invar ⊢
-    intro p
-    specialize prior_invar p
+    intro p p_expandable
+    specialize prior_invar p p_expandable
     obtain ⟨v', v'_in_p, was_open ⟩ := prior_invar
     unfold node_open at was_open ⊢
     rw [stack_compose] at was_open
@@ -290,8 +313,17 @@ lemma astar_expand_keeps_path_invar {start : V} (goal : V)
             exact head'_on_stack
         · by_cases head'_visited : head' ∈ state.visited
           ·
+            have head'_goal_expandable : ∀ u ∈ head'_goal.support, hsearch_expandable heur u := by
+              intro u hu
+              apply p_expandable
+              unfold Path.support
+              rw [← compose, Walk.support_of_append]
+              apply List.mem_append_right
+              rw [head_goal_compose, Walk.support_cons]
+              simpa using hu
             obtain ⟨ v', proof ⟩ := by
-              apply astar_expand_path_one_on_stack (goal := goal) (v:=head') <;> try assumption
+              apply astar_expand_path_one_on_stack (goal := goal) (v:=head')
+                (v_goal := head'_goal) (walk_expandable := head'_goal_expandable) <;> try assumption
               · rw [stack_compose]
                 grind
               · rw [head_goal_compose] at head_goal_nodup
@@ -311,7 +343,8 @@ lemma astar_expand_keeps_path_invar {start : V} (goal : V)
           · use head'
             constructor
             · exact head'_in_p
-            · unfold hsearch_step_expand
+            · have head'_exp : heur head' ≠ ⊤ := p_expandable head' head'_in_p
+              unfold hsearch_step_expand
               simp
               right
               grind
@@ -458,10 +491,11 @@ For nodup: start_w'_walk.support is Nodup since it's a prefix of p.val which has
 -/
 lemma find_open_on_walk_suffix
     {s : WeightedDiGraph.base_search_state g (ℕ×ℕ)}
-    (on_stack_or_nei : search_invar_on_stack_or_all_neighbours_visited s)
-    (closed_bound_s : hsearch_invar_on_stack_or_all_neighbours_max_order s)
+    (on_stack_or_nei : search_invar_on_stack_or_all_neighbours_visited (hsearch_expandable heur) s)
+    (closed_bound_s : hsearch_invar_on_stack_or_all_neighbours_max_order heur s)
     (pathOrder_ge_g : ∀ u : V, u ∈ s.visited → ∀ d : ℕ, g.cost_is start u d → d ≤ (s.pathOrder u).1)
     {w v : V} (w_v : g.Walk w v)
+    (w_v_expandable : ∀ u ∈ w_v.support, hsearch_expandable heur u)
     (hv_not_closed : ¬ node_closed s v)
     {p : g.Path start v} (hp : p.is_cheapest)
     (hw_on_p : w ∈ p.support)
@@ -477,9 +511,16 @@ lemma find_open_on_walk_suffix
       have h := on_stack_or_nei ⟨w, hw_closed.1⟩
       rcases h with h_stack | h_nei
       · exact absurd h_stack hw_closed.2
-      · exact h_nei w' adj_w_w'
+      · exact h_nei w' adj_w_w' (w_v_expandable w' (by
+          rw [Walk.support_cons]; exact List.mem_cons_of_mem _ (Walk.start_in_support rest)))
+    have w'_expandable : hsearch_expandable heur w' := w_v_expandable w' (by
+      rw [Walk.support_cons]; exact List.mem_cons_of_mem _ (Walk.start_in_support rest))
+    have rest_expandable : ∀ u ∈ rest.support, hsearch_expandable heur u := by
+      intro u hu
+      apply w_v_expandable
+      rw [Walk.support_cons]; exact List.mem_cons_of_mem _ hu
     have bound : (s.pathOrder w').1 ≤ (s.pathOrder w).1 + g.edgeCost adj_w_w' :=
-      closed_bound_s ⟨ w, hw_closed.1 ⟩ hw_closed.2 w' adj_w_w'
+      closed_bound_s ⟨ w, hw_closed.1 ⟩ hw_closed.2 w' adj_w_w' w'_expandable
     obtain ⟨start_w, hcompose⟩ := w_v_is_suffix
     -- start_w.concat adj = start_w.append (cons adj nil)
     -- (start_w.concat adj).append rest = start_w.append (cons adj rest) = p.val
@@ -533,7 +574,7 @@ lemma find_open_on_walk_suffix
       exact Walk.goal_in_support (start_w.concat adj_w_w')
     by_cases w'_closed : node_closed s w'
     · obtain ⟨v', hv'_mem, hv'_open, hv'_cost⟩ := find_open_on_walk_suffix
-        on_stack_or_nei closed_bound_s pathOrder_ge_g rest hv_not_closed hp
+        on_stack_or_nei closed_bound_s pathOrder_ge_g rest rest_expandable hv_not_closed hp
         w'_on_p ⟨start_w.concat adj_w_w', concat_append⟩ w'_closed w'_cost_is
       exact ⟨v', by rw [Walk.support_cons]; exact List.mem_cons_of_mem w hv'_mem,
              hv'_open, hv'_cost⟩
@@ -549,18 +590,23 @@ lemma find_open_on_walk_suffix
 /-- Wrapper: find an open node on a cheapest path from a closed node with optimal pathOrder. -/
 lemma find_open_on_path_from_closed
     {s : WeightedDiGraph.base_search_state g (ℕ×ℕ)}
-    (on_stack_or_nei : search_invar_on_stack_or_all_neighbours_visited s)
-    (closed_bound_s : hsearch_invar_on_stack_or_all_neighbours_max_order s)
+    (on_stack_or_nei : search_invar_on_stack_or_all_neighbours_visited (hsearch_expandable heur) s)
+    (closed_bound_s : hsearch_invar_on_stack_or_all_neighbours_max_order heur s)
     (pathOrder_ge_g : ∀ v : V, v ∈ s.visited → ∀ d : ℕ, g.cost_is start v d → d ≤ (s.pathOrder v).1)
     {v : V} (hv_not_closed : ¬ node_closed s v)
     {p : g.Path start v} (hp : p.is_cheapest)
+    (p_expandable : ∀ u ∈ p.support, hsearch_expandable heur u)
     {w : V} (hw_on_p : w ∈ p.support) (hw_ne_v : w ≠ v)
     (hw_closed : node_closed s w)
     (hw_cost_is : g.cost_is start w (s.pathOrder w).1) :
     ∃ v' ∈ p.support, node_open s v' ∧ g.cost_is start v' (s.pathOrder v').1 := by
   obtain ⟨start_w, w_v, hcompose⟩ := p.val.split_at hw_on_p
-  obtain ⟨v', hv'_mem, hv'_open, hv'_cost⟩ := find_open_on_walk_suffix
-    on_stack_or_nei closed_bound_s pathOrder_ge_g w_v hv_not_closed hp
+  have w_v_expandable : ∀ u ∈ w_v.support, hsearch_expandable heur u := by
+    intro u hu
+    apply p_expandable
+    exact Walk.mem_support_suffix_of_append start_w w_v hcompose u hu
+  obtain ⟨v', hv'_mem, hv'_open, hv'_cost⟩ := find_open_on_walk_suffix heur
+    on_stack_or_nei closed_bound_s pathOrder_ge_g w_v w_v_expandable hv_not_closed hp
     hw_on_p ⟨start_w, hcompose⟩ hw_closed hw_cost_is
   refine ⟨v', ?_, hv'_open, hv'_cost⟩
   unfold Path.support
@@ -590,11 +636,11 @@ lemma astar_invar_from_state_properties
     {s : WeightedDiGraph.base_search_state g (ℕ×ℕ)}
     (start_visited : start ∈ s.visited)
     (start_pathOrder_zero : (s.pathOrder start).1 = 0)
-    (on_stack_or_nei : search_invar_on_stack_or_all_neighbours_visited s)
-    (closed_bound_s : hsearch_invar_on_stack_or_all_neighbours_max_order s)
+    (on_stack_or_nei : search_invar_on_stack_or_all_neighbours_visited (hsearch_expandable heur) s)
+    (closed_bound_s : hsearch_invar_on_stack_or_all_neighbours_max_order heur s)
     (pathOrder_ge_g : ∀ v : V, v ∈ s.visited → ∀ d : ℕ, g.cost_is start v d → d ≤ (s.pathOrder v).1) :
-    astar_invar start s := by
-  intro v hv_not_closed p hp_cheapest
+    astar_invar heur start s := by
+  intro v hv_not_closed p hp_cheapest p_expandable
   by_cases hv_start : v = start
   generalize_proofs at *; (
   -- Since $v = start$, the path from $start$ to $v$ is just the start itself. Therefore, $start$ is the node we're looking for.
@@ -605,13 +651,10 @@ lemma astar_invar_from_state_properties
   by_cases hv_open : node_open s start;
   · refine ⟨ start, ?_, hv_open, by simpa [ start_pathOrder_zero ] using cost_v_v start ⟩
     exact WeightedDiGraph.Walk.start_in_support p.1
-  · apply find_open_on_path_from_closed on_stack_or_nei closed_bound_s pathOrder_ge_g
-    exact hv_not_closed
-    exact hp_cheapest
-    any_goals exact start
-    all_goals generalize_proofs at *; simp_all +decide [ node_closed, node_open ]
-    · exact Ne.symm hv_start;
-    · exact cost_v_v start
+  · exact find_open_on_path_from_closed heur on_stack_or_nei closed_bound_s pathOrder_ge_g
+      hv_not_closed hp_cheapest p_expandable (w := start)
+      (WeightedDiGraph.Walk.start_in_support p.1) (Ne.symm hv_start)
+      ⟨start_visited, hv_open⟩ (by rw [start_pathOrder_zero]; exact cost_v_v start)
 
 
 /-- After expansion, the optimal cost is ≤ pathOrder for all visited nodes in the new state. -/
@@ -649,59 +692,62 @@ lemma pathOrder_ge_optimal_all_after_expand
 
 
 lemma astar_expand_keeps_main_invar (goal : V)
-    (base_invars : search_invar_all_basic start state)
+    (base_invars : search_invar_all_basic (hsearch_expandable heur) start state)
     (diff_invar : hsearch_path_order_diff_by_edge_cost start state)
-    (closed_bound : hsearch_invar_on_stack_or_all_neighbours_max_order state)
+    (closed_bound : hsearch_invar_on_stack_or_all_neighbours_max_order heur state)
+    (heur_finite : hsearch_invar_visited_heur_finite heur state)
     (start_zero : hsearch_invar_start_path_order_zero_zero start state)
     :
      ∀ head : V, ∀ tail : List V,
           head ≠ goal
           ∧ state.stack = head :: tail
-        → astar_invar start (hsearch_step_expand heur state head tail) := by
+        → astar_invar heur start (hsearch_step_expand heur state head tail) := by
     intro head tail ⟨head_ne_goal, stack_compose⟩
     -- Extract properties from base_invars
     obtain ⟨stack_vis, mother_vis, mother_adj, mother_dec, on_stack_nei, start_vis⟩ := base_invars
     -- Get new base invars
-    have new_base : search_invar_all_basic start (hsearch_step_expand heur state head tail) :=
+    have new_base : search_invar_all_basic (hsearch_expandable heur) start (hsearch_step_expand heur state head tail) :=
       hsearch_expand_keeps_base_invars heur state head tail
         ⟨⟨stack_vis, mother_vis, mother_adj, mother_dec, on_stack_nei, start_vis⟩, head_ne_goal, stack_compose⟩
     obtain ⟨new_stack_vis, _, _, _, new_on_stack_nei, new_start_vis⟩ := new_base
     -- Start pathOrder.1 = 0 in new state
     have new_start_zero := hsearch_expand_start_path_order_zero_carries heur state start goal start_vis head tail ⟨ start_zero, head_ne_goal, stack_compose ⟩
     -- closed_neighbor_pathOrder_bound in new state
-    have new_closed_bound := hsearch_expand_keeps_on_stack_or_nei_max_order heur state goal on_stack_nei head tail
+    have new_closed_bound := hsearch_expand_keeps_on_stack_or_nei_max_order heur state goal on_stack_nei heur_finite head tail
       ⟨closed_bound, head_ne_goal, stack_compose⟩
     -- pathOrder_ge_optimal for all visited nodes in new state
     have new_pathOrder_ge := pathOrder_ge_optimal_all_after_expand heur state mother_vis mother_adj mother_dec diff_invar stack_vis
       head tail stack_compose
     -- Apply astar_invar_from_state_properties
-    exact astar_invar_from_state_properties new_start_vis (by simp [new_start_zero]) new_on_stack_nei new_closed_bound new_pathOrder_ge
+    exact astar_invar_from_state_properties heur new_start_vis (by simp [new_start_zero]) new_on_stack_nei new_closed_bound new_pathOrder_ge
 
 end
 
 /-- Bundled invariant for the A* search. -/
 abbrev astar_all_invar (start goal : V) (s : WeightedDiGraph.base_search_state g (ℕ×ℕ)) :=
-  WeightedDiGraph.search_invar_all_basic start s
+  WeightedDiGraph.search_invar_all_basic (hsearch_expandable heur) start s
   ∧ hsearch_path_order_diff_by_edge_cost start s
-  ∧ astar_invar start s
-  ∧ astar_path_invar start goal s
+  ∧ astar_invar heur start s
+  ∧ astar_path_invar heur start goal s
   ∧ astar_stack_sorted heur s
   ∧ astar_goal_invar goal s
-  ∧ hsearch_invar_on_stack_or_all_neighbours_max_order s
+  ∧ hsearch_invar_on_stack_or_all_neighbours_max_order heur s
+  ∧ hsearch_invar_visited_heur_finite heur s
   ∧ hsearch_invar_start_path_order_zero_zero  start s
 
 lemma astar_all_invar_holds_at_init (start goal : V) :
     astar_all_invar heur start goal (WeightedDiGraph.base_search_state_initial (G:=g) start (0,0)) := by
-  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
-  · exact WeightedDiGraph.base_search_state_initial_all_basic_invars start (0,0)
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · exact WeightedDiGraph.base_search_state_initial_all_basic_invars start (0,0) (hsearch_expandable heur)
   · intro mother_adj u hv u_ne_start
     unfold WeightedDiGraph.base_search_state_initial at hv
     simp at hv; subst hv; exact absurd rfl u_ne_start
-  · exact astar_invar_holds_at_init start
-  · intro p; use start; simp [node_open]
+  · exact astar_invar_holds_at_init heur start
+  · intro p _; use start; simp [node_open]
   · simp [astar_stack_sorted]
   · intro hv; simp at hv ⊢; exact hv
   · simp [hsearch_invar_on_stack_or_all_neighbours_max_order,WeightedDiGraph.base_search_state_initial]
+  · intro a _ hne; simp at hne
   · simp [hsearch_invar_start_path_order_zero_zero]
 
 /-- The bundled A* invariant is preserved by expansion. -/
@@ -709,16 +755,16 @@ lemma astar_all_invar_preserved :
     WeightedDiGraph.base_invar_carries_over_expand
       (G := g) (D := ℕ×ℕ) (state_type := WeightedDiGraph.base_search_state g (ℕ×ℕ))
       (hsearch_step_expand heur) goal (astar_all_invar heur start goal) := by
-  intro s head tail ⟨⟨base_invars, diff, main, path_inv, sorted, goal_inv, closed_bd, start_zero⟩, head_ne_goal, stack_compose⟩
+  intro s head tail ⟨⟨base_invars, diff, main, path_inv, sorted, goal_inv, closed_bd, heur_fin, start_zero⟩, head_ne_goal, stack_compose⟩
   obtain ⟨stack_vis, mother_vis, mother_adj, mother_dec, on_stack_nei, start_vis⟩ := base_invars
-  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
   · exact hsearch_expand_keeps_base_invars heur s head tail
       ⟨⟨stack_vis, mother_vis, mother_adj, mother_dec, on_stack_nei, start_vis⟩, head_ne_goal, stack_compose⟩
   · exact hsearch_expand_keeps_on_path_order_diff heur s start goal stack_vis mother_adj mother_vis head tail
       ⟨diff, head_ne_goal, stack_compose⟩
   · exact astar_expand_keeps_main_invar heur s goal
       ⟨stack_vis, mother_vis, mother_adj, mother_dec, on_stack_nei, start_vis⟩
-      diff closed_bd start_zero head tail
+      diff closed_bd heur_fin start_zero head tail
       ⟨head_ne_goal, stack_compose⟩
   · exact astar_expand_keeps_path_invar heur s goal on_stack_nei goal_inv stack_vis head tail
       ⟨path_inv, head_ne_goal, stack_compose⟩
@@ -726,23 +772,62 @@ lemma astar_all_invar_preserved :
       ⟨sorted, head_ne_goal, stack_compose⟩
   · exact astar_expand_keeps_goal_invar heur s goal head tail
       ⟨goal_inv, head_ne_goal, stack_compose⟩
-  · exact hsearch_expand_keeps_on_stack_or_nei_max_order heur s goal on_stack_nei head tail
+  · exact hsearch_expand_keeps_on_stack_or_nei_max_order heur s goal on_stack_nei heur_fin head tail
       ⟨closed_bd, head_ne_goal, stack_compose⟩
+  · exact hsearch_expand_keeps_visited_heur_finite heur s head tail heur_fin
   · exact hsearch_expand_start_path_order_zero_carries heur s start goal start_vis head tail
       ⟨start_zero, head_ne_goal, stack_compose⟩
+/-- Every node on a path to `goal` has a finite heuristic value when the heuristic
+is admissible: the suffix of the path starting at that node is itself a path to the
+goal, so its (finite) cost bounds the heuristic estimate from above. -/
+lemma support_expandable_of_admissible {goal : V} (is_admissible : g.admissible heur goal)
+    {v : V} (p : g.Path v goal) : ∀ u ∈ p.support, hsearch_expandable heur u := by
+  intro u hu
+  obtain ⟨start_u, u_goal, compose⟩ := p.val.split_at hu
+  have u_goal_nodup : u_goal.support.Nodup :=
+    Walk.nodup_suffix_of_append_nodup start_u u_goal (compose ▸ p.prop)
+  let q : g.Path u goal := ⟨u_goal, u_goal_nodup⟩
+  have hle : heur u ≤ (q.cost : ℕ∞) := is_admissible u q
+  intro h_top
+  rw [h_top] at hle
+  simp at hle
+
+/-- For an admissible heuristic, the mere existence of a path from `start` to `goal`
+yields a path all of whose nodes have a finite heuristic value.  Every node on a path
+to the goal is expandable (`support_expandable_of_admissible`), so any such path works. -/
+lemma exists_expandable_path_of_admissible {start goal : V}
+    (is_admissible : g.admissible heur goal)
+    (hp : Nonempty (g.Path start goal)) :
+    ∃ p : g.Path start goal, ∀ u ∈ p.support, hsearch_expandable heur u := by
+  obtain ⟨p⟩ := hp
+  exact ⟨p, support_expandable_of_admissible heur is_admissible p⟩
+
+/-- A* is complete for admissible heuristics: if there is any path from `start` to
+`goal` and the heuristic is admissible, then A* finds a path.  This is a corollary of
+`astar_is_complete`, since admissibility guarantees every node on such a path has a
+finite heuristic value, so none is disregarded.  We keep `astar_is_complete` as the
+more general statement that only requires an explicit expandable path. -/
+theorem astar_is_complete_of_admissible (start goal : V)
+    (is_admissible : g.admissible heur goal)
+    (hp : Nonempty (g.Path start goal)) :
+    Option.isSome (astar (g:=g) heur start goal) :=
+  astar_is_complete heur start goal
+    (exists_expandable_path_of_admissible heur is_admissible hp)
 
 lemma astar_open_node_with_lower_f (start goal : V) (s : WeightedDiGraph.base_search_state g (ℕ×ℕ))
   (is_admissible : g.admissible heur goal)
-  (has_astar_invar : astar_invar start s)
-  (has_path_invar : astar_path_invar start goal s)
+  (has_astar_invar : astar_invar heur start s)
+  (has_path_invar : astar_path_invar heur start goal s)
   :
   ∀ p : g.Path start goal, p.is_cheapest →
-    ∃ v' ∈ p.support, (node_open s v') ∧ (s.pathOrder v').1 + (heur v') ≤ p.cost
+    ∃ v' ∈ p.support, (node_open s v') ∧ (s.pathOrder v').1 + (heur v').toNat ≤ p.cost
   := by
   intro p p_cheapest
+  have p_expandable : ∀ u ∈ p.support, hsearch_expandable heur u :=
+    support_expandable_of_admissible heur is_admissible p
   unfold astar_invar at has_astar_invar
   unfold astar_path_invar at has_path_invar
-  obtain ⟨v', v'_in_p, v'_open⟩ := has_path_invar p
+  obtain ⟨v', v'_in_p, v'_open⟩ := has_path_invar p p_expandable
 
   specialize has_astar_invar v'
   unfold node_closed at has_astar_invar
@@ -752,8 +837,12 @@ lemma astar_open_node_with_lower_f (start goal : V) (s : WeightedDiGraph.base_se
     Walk.nodup_prefix_of_append_nodup start_v' v'_goal (compose ▸ p.prop)
   have start_v'_cheapest : Path.is_cheapest ⟨start_v', start_v'_nodup⟩ :=
     Path.subpath_of_cheapest_is_cheapest p start_v' v'_goal compose start_v'_nodup p_cheapest
+  have start_v'_expandable : ∀ u ∈ start_v'.support, hsearch_expandable heur u := by
+    intro u hu
+    apply p_expandable
+    exact Walk.mem_support_prefix_of_append start_v' v'_goal compose u hu
 
-  specialize has_astar_invar start_v' start_v'_nodup start_v'_cheapest
+  specialize has_astar_invar start_v' start_v'_nodup start_v'_cheapest start_v'_expandable
 
   obtain ⟨v'',v''_in_support,v''_open,v''_cost_is⟩ := has_astar_invar
 
@@ -766,26 +855,22 @@ lemma astar_open_node_with_lower_f (start goal : V) (s : WeightedDiGraph.base_se
     left
     exact v''_in_support
   · exact v''_open
-  · unfold Path.cost
-    have v''_in_p : v'' ∈ p.support := by
+  · have v''_in_p : v'' ∈ p.support := by
       unfold Path.support
       exact Walk.mem_support_prefix_of_append start_v' v'_goal compose v'' v''_in_support
-    obtain ⟨start_v'', v''_goal, compose⟩ := p.val.split_at v''_in_p
-
-    rw [←compose]
-    rw [Walk.append_cost]
-    apply add_le_add
-    · apply walk_more_costly_than_chapest
-      exact v''_cost_is
-    · unfold admissible at is_admissible
-      specialize is_admissible v''
-      unfold cost_ge at is_admissible
-
-      -- subwalk of p
-      have v''_goal_nodup : v''_goal.support.Nodup :=
-        Walk.nodup_suffix_of_append_nodup start_v'' v''_goal (compose ▸ p.prop)
-      specialize is_admissible ⟨v''_goal, v''_goal_nodup⟩
-      apply is_admissible
+    obtain ⟨start_v'', v''_goal, compose2⟩ := p.val.split_at v''_in_p
+    have v''_goal_nodup : v''_goal.support.Nodup :=
+      Walk.nodup_suffix_of_append_nodup start_v'' v''_goal (compose2 ▸ p.prop)
+    have h1 : (s.pathOrder v'').1 ≤ start_v''.cost :=
+      walk_more_costly_than_chapest start v'' _ v''_cost_is start_v''
+    have h2 : (heur v'').toNat ≤ v''_goal.cost := by
+      let q2 : g.Path v'' goal := ⟨v''_goal, v''_goal_nodup⟩
+      have hle : heur v'' ≤ (q2.cost : ℕ∞) := is_admissible v'' q2
+      exact ENat.toNat_le_of_le_coe hle
+    have hpcost : p.cost = start_v''.cost + v''_goal.cost := by
+      unfold Path.cost; rw [← compose2, Walk.append_cost]
+    rw [hpcost]
+    exact Nat.add_le_add h1 h2
 
 
 
@@ -795,7 +880,7 @@ theorem admissible_heur_zero_for_goal
     heur goal = 0 := by
       specialize is_admissible goal (nil_path goal)
       rw [Path.cost_nil_zero] at is_admissible
-      simp_all only [ge_iff_le, nonpos_iff_eq_zero]
+      simpa using is_admissible
 
 /- -/
 theorem astar_is_optimal (start : V) (goal : V)
@@ -889,8 +974,8 @@ theorem astar_is_optimal (start : V) (goal : V)
     have prop := hsearch_path_extracted_not_longer_than_path_order start final_state t_1 t_2 t_3
       astar_full_invar_at_end.2.1
 
-    have has_astar_invar : astar_invar start final_state := astar_full_invar_at_end.2.2.1
-    have has_astar_path_invar : astar_path_invar start goal final_state := astar_full_invar_at_end.2.2.2.1
+    have has_astar_invar : astar_invar heur start final_state := astar_full_invar_at_end.2.2.1
+    have has_astar_path_invar : astar_path_invar heur start goal final_state := astar_full_invar_at_end.2.2.2.1
     have xx := astar_open_node_with_lower_f heur start goal final_state is_admissible has_astar_invar
 
 
@@ -927,7 +1012,7 @@ theorem astar_is_optimal (start : V) (goal : V)
           specialize tail_larger v' v'_in_tail
           unfold add_heur at tail_larger
           rw [admissible_heur_zero_for_goal heur is_admissible] at tail_larger
-          simp only [add_zero] at tail_larger
+          simp only [ENat.toNat_zero, add_zero] at tail_larger
           cases tail_larger
           case inl h =>
             apply le_of_eq
@@ -948,10 +1033,10 @@ end NatGraph
 
 namespace NatGraph
 
-variable (heur : V → ℕ)
+variable (heur : V → ℕ∞)
 
 
-def opt_heur : Option V → ℕ := fun v =>
+def opt_heur : Option V → ℕ∞ := fun v =>
     match v with
     | none => 0
     | some v' => heur v'
@@ -994,26 +1079,61 @@ theorem astar_multigoal_is_sound (start : V) (goals : List V) :
         exact thePath.prop
 
 
-/-
-PROVIDED SOLUTION
-Given ∃ goal ∈ goals, ∃ x : g.Path start goal, x = x, obtain the goal and path p. By path_in_augmented_exists (using goal_in_goals and p), we get a path q from (some start) to none in the augmented graph g.add_artificial_goal goals. This means ∃ x : (g.add_artificial_goal goals).Path (some start) none, x = x. By astar_is_complete applied to the augmented graph (g.add_artificial_goal goals) with heuristic (opt_heur heur), start = (some start), goal = none, we get that astar returns Some on the augmented graph. Unfolding astar_multigoal, the match on the astar result in the Some case returns Some, so astar_multigoal returns Some, i.e. Option.isSome is true.
--/
+/-- Lifting an expandable path to the augmented graph: if every node of a path
+`p : g.Path start goal` (with `goal ∈ goals`) has a finite heuristic value, then there
+is a path from `some start` to `none` in the augmented graph all of whose nodes have a
+finite `opt_heur heur` value.  The lifted path is `p` (with each node wrapped in `some`)
+followed by the artificial zero-cost edge to `none`; `none` is mapped to `0` by
+`opt_heur`, and every other node inherits finiteness from `p`. -/
+lemma augmented_expandable_path {goals : List V} {start goal : V}
+    (goal_in_goals : goal ∈ goals)
+    (p : g.Path start goal)
+    (hp : ∀ u ∈ p.support, heur u ≠ ⊤) :
+    ∃ q : (g.add_artificial_goal goals).Path (some start) none,
+      ∀ u ∈ q.support, hsearch_expandable (opt_heur heur) u := by
+  have adj_none : (g.add_artificial_goal goals).Adj (some goal) none := by
+    unfold NatGraph.add_artificial_goal; simp_all
+  have w_supp : (NatGraph.lift_walk_to_augmented (G:=g) (goals:=goals) p.val).support
+      = p.val.support.map some := NatGraph.lift_walk_support_eq p.val
+  have wc_supp : (((NatGraph.lift_walk_to_augmented (G:=g) (goals:=goals) p.val).concat adj_none)).support
+      = p.val.support.map some ++ [none] := by
+    simp [w_supp]
+  have wc_nodup : (((NatGraph.lift_walk_to_augmented (G:=g) (goals:=goals) p.val).concat adj_none)).support.Nodup := by
+    rw [wc_supp, List.nodup_append]
+    refine ⟨p.prop.map (Option.some_injective V), by simp, ?_⟩
+    intro a ha b hb
+    rw [List.mem_singleton] at hb
+    subst hb
+    obtain ⟨x, _, rfl⟩ := List.mem_map.mp ha
+    exact Option.some_ne_none x
+  refine ⟨⟨(NatGraph.lift_walk_to_augmented (G:=g) (goals:=goals) p.val).concat adj_none, wc_nodup⟩, ?_⟩
+  intro u hu
+  have hu' : u ∈ p.val.support.map some ++ [none] := by
+    rw [← wc_supp]; exact hu
+  rcases List.mem_append.mp hu' with h | h
+  · obtain ⟨u', hu'_mem, rfl⟩ := List.mem_map.mp h
+    show opt_heur heur (some u') ≠ ⊤
+    simpa [opt_heur] using hp u' hu'_mem
+  · simp only [List.mem_singleton] at h
+    subst h
+    simp [opt_heur, hsearch_expandable]
+
+/-- A* over multiple goals is complete: if there is a path from `start` to some node in
+`goals` all of whose nodes have a *finite* heuristic value, then `astar_multigoal`
+finds a path.  As for `astar_is_complete`, the finiteness hypothesis is necessary
+because nodes whose heuristic estimates an infinite distance are disregarded. -/
 theorem astar_multigoal_is_complete (start : V) (goals : List V):
-    ((∃ goal ∈ goals, ∃ x : (g.Path start goal), x = x) → Option.isSome (astar_multigoal (g:=g) heur start goals)) := by
-  contrapose!;
-  intro h_contra goal hgoal x hx
-  have h_path_in_augmented : ∃ q : (g.add_artificial_goal goals).Path (some start) none, q = q := by
-    exact path_in_augmented_exists hgoal x;
-  obtain ⟨ q, hq ⟩ := h_path_in_augmented;
-  convert NatGraph.astar_is_complete ( g := g.add_artificial_goal goals ) ( opt_heur heur ) ( some start ) none _;
-  · unfold astar_multigoal at h_contra
-    simp_all only [ne_eq, Bool.not_eq_true, Option.isSome_eq_false_iff, Option.isNone_iff_eq_none, false_iff]
-    obtain ⟨val, property⟩ := x
-    obtain ⟨val_1, property_1⟩ := q
-    split at h_contra
-    next ret heq => simp_all only
-    next ret p heq => simp_all only [reduceCtorEq]
-  · exact ⟨ q, rfl ⟩
+    ((∃ goal ∈ goals, ∃ p : (g.Path start goal), ∀ u ∈ p.support, heur u ≠ ⊤) →
+      Option.isSome (astar_multigoal (g:=g) heur start goals)) := by
+  rintro ⟨goal, hgoal, x, hx⟩
+  obtain ⟨q, hq_exp⟩ := augmented_expandable_path heur hgoal x hx
+  have h_astar : Option.isSome
+      (astar (g:=g.add_artificial_goal goals) (opt_heur heur) (some start) none) :=
+    NatGraph.astar_is_complete (g := g.add_artificial_goal goals) (opt_heur heur)
+      (some start) none ⟨q, hq_exp⟩
+  unfold astar_multigoal
+  dsimp only
+  split <;> simp_all
 
 /-
 PROBLEM
@@ -1041,23 +1161,25 @@ lemma opt_heur_admissible {goals : List V}
       by_cases hv : v = none
       · unfold opt_heur
         subst hv
-        simp_all only [WeightedDiGraph.Path.cost_same, ge_iff_le, zero_le]
+        simp_all only [WeightedDiGraph.Path.cost_same, zero_le]
       · obtain ⟨ v', rfl ⟩ := Option.ne_none_iff_exists'.mp hv
         obtain ⟨w, hw⟩ : ∃ w : V, ∃ p' : (g.add_artificial_goal goals).Path (some v') (some w), ∃ w_adj_none : (g.add_artificial_goal goals).Adj w none, none∉ p'.support ∧ p.val = p'.val.concat w_adj_none := by
           obtain ⟨w, hw⟩ : ∃ w : Option V, ∃ p' : (g.add_artificial_goal goals).Path (some v') w, ∃ w_adj_none : (g.add_artificial_goal goals).Adj w none, none∉ p'.support ∧ p.val = p'.val.concat w_adj_none := by
             exact WeightedDiGraph.Path.split_at_end p hv;
           cases w <;> tauto;
         obtain ⟨ p', w_adj_none, hp'_none, hp_eq ⟩ := hw
-        have h_cost_p' : p'.cost ≥ heur v' := by
+        have h_cost_p' : heur v' ≤ (p'.cost : ℕ∞) := by
           have h_cost_p' : ∃ q : g.Path v' w, q.cost = p'.cost := by
             exact ⟨ NatGraph.translate_path (G:=g) p' hp'_none, NatGraph.translate_walk_cost_eq _ hp'_none ⟩
           obtain ⟨ q, hq ⟩ := h_cost_p';
-          exact le_of_le_of_eq (is_admissible v' w w_adj_none q) hq
+          exact le_of_le_of_eq (is_admissible v' w w_adj_none q) (by rw [hq])
         have h_cost_p : p.cost = p'.cost + (g.add_artificial_goal goals).edgeCost w_adj_none := by
           grind +suggestions
+        unfold opt_heur
         rw [h_cost_p]
-        simp
-        exact le_add_right h_cost_p' |> le_trans ( by rfl )
+        refine le_trans h_cost_p' ?_
+        push_cast
+        exact le_self_add
 
 /-
 PROBLEM

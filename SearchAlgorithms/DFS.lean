@@ -142,9 +142,9 @@ lemma dfs_expand_keeps_on_stack_or_all_neighbours_visited
     (priorState : base_search_state g ℕ)
     (stackHead : V)
     (stackTail : List V):
-     search_invar_on_stack_or_all_neighbours_visited priorState
+     search_invar_on_stack_or_all_neighbours_visited (fun _ => True) priorState
      ∧ priorState.stack = (stackHead :: stackTail)
-     → search_invar_on_stack_or_all_neighbours_visited
+     → search_invar_on_stack_or_all_neighbours_visited (fun _ => True)
           (dfs_step_expand g priorState stackHead stackTail)
           := by
       intro ⟨ invar_holds_on_prior_state, stack_composition ⟩
@@ -240,7 +240,7 @@ lemma dfs_expand_visited_increases
 
 
 lemma dfs_expand_keeps_base_invars:
-  base_invar_carries_over_expand (dfs_step_expand g) goal (search_invar_all_basic (G:=g) (D:=ℕ) start) := by
+  base_invar_carries_over_expand (dfs_step_expand g) goal (search_invar_all_basic (G:=g) (D:=ℕ) (fun _ => True) start) := by
   unfold base_invar_carries_over_expand
   unfold search_invar_all_basic
   intro s head tail ⟨ ⟨ i1,i2,i3,i4,i5,i6⟩ , head_not_goal, compose⟩
@@ -359,9 +359,12 @@ theorem dfs_is_sound (g: WeightedDiGraph V E) (start : V) (goal : V) :
 
 theorem dfs_is_complete (g: WeightedDiGraph V E) (start : V) (goal : V):
     ((∃ x : (g.Path start goal), x = x) → Option.isSome (dfs g start goal)) := by
+  intro hpath
+  obtain ⟨p, _⟩ := hpath
   unfold dfs
-  apply search_with_stack_step_is_complete
-  · apply dfs_expand_keeps_goal_on_stack
-  · apply dfs_expand_goal_becomes_visited_puts_it_on_stack
+  apply search_with_stack_step_is_complete (expandable := fun _ => True)
+    (goal_on_stack_carries_expand := dfs_expand_keeps_goal_on_stack)
+    (goal_trigger := dfs_expand_goal_becomes_visited_puts_it_on_stack goal)
+  exact ⟨p, fun u _ => trivial⟩
 
 end WeightedDiGraph

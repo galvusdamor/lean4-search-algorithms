@@ -142,9 +142,14 @@ abbrev search_invar_mother_is_adjacent (start : V) (s : base_search_state G D):=
 abbrev search_invar_mother_decreasing_path_order (start : V) (s : base_search_state G D) :=
       ∀ x : s.visited, ↑x ≠ start → s.pathOrder (s.mother x) ≺ s.pathOrder x
 
+/-- A node is either still on the stack or all of its *expandable* neighbours have
+already been visited.  The predicate `expandable` allows the search to disregard
+certain neighbours entirely (e.g. nodes whose heuristic value is `⊤`).  Choosing
+`expandable := fun _ => True` recovers the classical invariant that all neighbours
+are visited. -/
 @[simp]
-abbrev search_invar_on_stack_or_all_neighbours_visited (s : base_search_state G D):=
-      ∀ x : s.visited, ↑x ∈ s.stack ∨ ∀ y : V, (G.Adj x y) → y ∈ s.visited
+abbrev search_invar_on_stack_or_all_neighbours_visited (expandable : V → Prop) (s : base_search_state G D):=
+      ∀ x : s.visited, ↑x ∈ s.stack ∨ ∀ y : V, (G.Adj x y) → expandable y → y ∈ s.visited
 
 @[simp]
 abbrev search_invar_start_visited (start : V) (s : base_search_state G D) :=
@@ -156,12 +161,12 @@ abbrev search_invar_start_path_order_zero (start : V) (s : base_search_state G �
 
 
 @[simp]
-abbrev search_invar_all_basic (start : V) (s : base_search_state G D) :=
+abbrev search_invar_all_basic (expandable : V → Prop) (start : V) (s : base_search_state G D) :=
       search_invar_stack_is_visited s
       ∧ search_invar_mother_is_visited s
       ∧ search_invar_mother_is_adjacent start s
       ∧ search_invar_mother_decreasing_path_order start s
-      ∧ search_invar_on_stack_or_all_neighbours_visited s
+      ∧ search_invar_on_stack_or_all_neighbours_visited expandable s
       ∧ search_invar_start_visited start s
 
 
@@ -202,8 +207,8 @@ lemma search_invar_mother_decreasing_path_order_initial:
       simp
 
 @[simp]
-lemma search_invar_on_stack_or_all_neighbours_visited_initial:
-      search_invar_on_stack_or_all_neighbours_visited (G:=G) (base_search_state_initial start d) := by
+lemma search_invar_on_stack_or_all_neighbours_visited_initial (expandable : V → Prop):
+      search_invar_on_stack_or_all_neighbours_visited (G:=G) expandable (base_search_state_initial start d) := by
       unfold search_invar_on_stack_or_all_neighbours_visited
       unfold base_search_state_initial
       simp
@@ -215,8 +220,8 @@ lemma search_invar_start_visited_initial:
       unfold base_search_state_initial
       simp
 
-lemma base_search_state_initial_all_basic_invars:
-    search_invar_all_basic (G:=G) start (base_search_state_initial start d) := by
+lemma base_search_state_initial_all_basic_invars (expandable : V → Prop):
+    search_invar_all_basic (G:=G) expandable start (base_search_state_initial start d) := by
       unfold search_invar_all_basic ; and_intros <;> simp
 
 

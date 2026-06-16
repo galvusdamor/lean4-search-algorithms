@@ -343,6 +343,24 @@ lemma mem_support_prefix_of_append {u v w : V}
       apply List.mem_append_left
       exact hv
 
+/-- If `v'' ∈ wv.support` and `uw.append wv = full`, then `v'' ∈ full.support`. -/
+lemma mem_support_suffix_of_append {u v w : V}
+    (uw : G.Walk u w) (wv : G.Walk w v) {full : G.Walk u v}
+    (compose : uw.append wv = full)
+    (v'' : V) (hv : v'' ∈ wv.support) :
+    v'' ∈ full.support := by
+      subst compose
+      rw [Walk.support_of_append, List.mem_append]
+      cases wv with
+      | nil =>
+        simp only [Walk.support, List.mem_singleton] at hv
+        subst hv
+        left; exact Walk.goal_in_support uw
+      | cons h rest =>
+        rw [Walk.support_cons] at hv
+        rcases List.mem_cons.mp hv with rfl | htail
+        · left; exact Walk.goal_in_support uw
+        · right; simpa [Walk.support_cons] using htail
 
 /-
 PROBLEM

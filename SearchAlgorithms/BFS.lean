@@ -142,9 +142,9 @@ lemma bfs_expand_keeps_on_stack_or_all_neighbours_visited
     (priorState : base_search_state g ℕ)
     (stackHead : V)
     (stackTail : List V):
-     search_invar_on_stack_or_all_neighbours_visited priorState
+     search_invar_on_stack_or_all_neighbours_visited (fun _ => True) priorState
      ∧ priorState.stack = (stackHead :: stackTail)
-     → search_invar_on_stack_or_all_neighbours_visited
+     → search_invar_on_stack_or_all_neighbours_visited (fun _ => True)
           (bfs_step_expand g priorState stackHead stackTail)
           := by
       intro ⟨ invar_holds_on_prior_state, stack_composition ⟩
@@ -238,7 +238,7 @@ lemma bfs_expand_visited_increases
 
 
 lemma bfs_expand_keeps_base_invars:
-  base_invar_carries_over_expand (bfs_step_expand g) goal (search_invar_all_basic (G:=g) (D:=ℕ) start) := by
+  base_invar_carries_over_expand (bfs_step_expand g) goal (search_invar_all_basic (G:=g) (D:=ℕ) (fun _ => True) start) := by
   unfold base_invar_carries_over_expand
   unfold search_invar_all_basic
   intro s head tail ⟨ ⟨ i1,i2,i3,i4,i5,i6⟩ , head_not_goal, compose⟩
@@ -359,12 +359,15 @@ theorem bfs_is_sound (g: WeightedDiGraph V E) (start : V) (goal : V) :
 
 theorem bfs_is_complete (g: WeightedDiGraph V E) (start : V) (goal : V):
     ((∃ x : (g.Path start goal), x = x) → Option.isSome (bfs g start goal)) := by
-  apply search_with_stack_step_is_complete
-  · apply bfs_expand_metric_reduction
-  · apply bfs_expand_keeps_base_invars
-  · rfl
-  · apply bfs_expand_keeps_goal_on_stack
-  · apply bfs_expand_goal_becomes_visited_puts_it_on_stack
+  intro hpath
+  obtain ⟨p, _⟩ := hpath
+  apply search_with_stack_step_is_complete (expandable := fun _ => True)
+    (metric_for_expand_proof := bfs_expand_metric_reduction)
+    (invar_carries := bfs_expand_keeps_base_invars)
+    (start_is_base_init := rfl)
+    (goal_on_stack_carries_expand := bfs_expand_keeps_goal_on_stack)
+    (goal_trigger := bfs_expand_goal_becomes_visited_puts_it_on_stack goal)
+  exact ⟨p, fun u _ => trivial⟩
 
 
 
@@ -410,7 +413,7 @@ abbrev astar_stack_shortest_path (start : V) (s : base_search_state g ℕ) :=
 
 
 abbrev bfs_all_invar (start : V) (s : base_search_state g ℕ) :=
-      search_invar_all_basic start s
+      search_invar_all_basic (fun _ => True) start s
     ∧ bfs_stack_shortest_path start s
     ∧ bfs_path_as_extracted_as_long_as_sort_index start s
     ∧ bfs_invar_on_stack_or_all_neighbours_max_order s
@@ -424,7 +427,7 @@ lemma order_u_le_walk_length_p (start u v : V)
   (p : g.Walk start v)
   (state : base_search_state g ℕ)
   (update_invar : bfs_invar_on_stack_or_all_neighbours_max_order state)
-  (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited state)
+  (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited (fun _ => True) state)
   (start_visited : start ∈ state.visited)
   (u_in_support : u ∈ p.support)
   (u_on_stack : u ∈ state.stack)
@@ -470,7 +473,7 @@ lemma order_u_le_path_length_p (start u v : V)
   (p : g.Path start v)
   (state : base_search_state g ℕ)
   (update_invar : bfs_invar_on_stack_or_all_neighbours_max_order state)
-  (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited state)
+  (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited (fun _ => True) state)
   (start_path_order : search_invar_start_path_order_zero start state)
   (start_visited : search_invar_start_visited start state)
   (u_in_support : u ∈ p.support)
@@ -707,7 +710,7 @@ lemma bfs_expand_keeps_max_diff (goal : V)
 
 lemma bfs_expand_keeps_on_stack_or_nei_max_order(goal : V)
     (state : base_search_state g ℕ)
-    (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited state)
+    (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited (fun _ => True) state)
     (max_diff_invar : bfs_stack_max_diff state)
     (stack_shortest : bfs_stack_shortest_path start state)
     (extract_length_invar : bfs_path_as_extracted_as_long_as_sort_index start state)
@@ -829,7 +832,7 @@ lemma bfs_expand_keeps_shortest_path_invar
     (mother_invar_adj : search_invar_mother_is_adjacent start state)
     (decreasing_invar : search_invar_mother_decreasing_path_order start state)
     (start_visited : search_invar_start_visited start state)
-    (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited state)
+    (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited (fun _ => True) state)
     (stack_visited_invar : search_invar_stack_is_visited state)
     -- new bfs_ specific invars
     (extract_length_invar : bfs_path_as_extracted_as_long_as_sort_index start state)
@@ -910,7 +913,7 @@ lemma bfs_expand_keeps_shortest_path_invar
 
             have p'_elem_on_stack_or_v_visited :
               (∃ u ∈ p'.support, u ∈ state.stack ∧ u ≠ v ∧ (p'.support.takeWhile (· ≠ u)).all (· ∉ state.stack)) ∨
-                (v ∈ state.visited ∧ ∀ u ∈ p'.support, u ≠ v → u ∉ state.stack ∧ u ∈ state.visited) := run_path_through_state_yields_node_on_stack_or_all_visited start v v_not_start p' state start_visited on_stack_or_nei_visited
+                (v ∈ state.visited ∧ ∀ u ∈ p'.support, u ≠ v → u ∉ state.stack ∧ u ∈ state.visited) := run_path_through_state_yields_node_on_stack_or_all_visited start v v_not_start p' state start_visited on_stack_or_nei_visited (fun u _ => trivial)
 
             cases p'_elem_on_stack_or_v_visited
             · next u_in_support_on_stack =>
@@ -1042,7 +1045,7 @@ lemma bfs_expand_keeps_shortest_path_invar
                 have p'_elem_on_stack_or_v_visited :
                   (∃ u ∈ p'.val.support, u ∈ state.stack ∧ u ≠ v ∧ (p'.support.takeWhile (· ≠ u)).all (· ∉ state.stack)) ∨
                     (v ∈ state.visited ∧ ∀ u ∈ p'.val.support, u ≠ v → u ∉ state.stack ∧ u ∈ state.visited) :=
-                  run_path_through_state_yields_node_on_stack_or_all_visited start v v_not_start p' state start_visited on_stack_or_nei_visited
+                  run_path_through_state_yields_node_on_stack_or_all_visited start v v_not_start p' state start_visited on_stack_or_nei_visited (fun u _ => trivial)
 
 
                 cases p'_elem_on_stack_or_v_visited

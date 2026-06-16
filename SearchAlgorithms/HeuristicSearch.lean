@@ -1,5 +1,6 @@
 import SearchAlgorithms.NatGraph
 import SearchAlgorithms.SearchStep
+import Mathlib.Data.ENat.Basic
 
 -- def local global variable for a graph
 variable {V : Type} [FinEnum V] [DecidableEq V]
@@ -77,21 +78,33 @@ def new_cost (priorState : hsearch_search_state g) (cur v : V) (adj : g.Adj cur 
   else
     (path_val priorState cur v adj)
 
+/-- The combined `f`-value used to order the search queue: the path order `p`
+with the (finite part of the) heuristic estimate `heur v` added to its first
+component.  The search only ever sorts nodes whose heuristic value is finite
+(nodes with `heur v = ⊤` are never inserted into the queue), so taking the
+`toNat` of `heur v` here loses no information for queued nodes. -/
 @[simp]
-def add_heur (v : V) (p : ℕ × ℕ) (heur : V → ℕ) : ℕ × ℕ := ⟨p.1 + heur v, p.2⟩
+def add_heur (v : V) (p : ℕ × ℕ) (heur : V → ℕ∞) : ℕ × ℕ := ⟨p.1 + (heur v).toNat, p.2⟩
+
+/-- A node is *expandable* by the heuristic search iff its heuristic value is
+finite.  A node whose heuristic estimates an infinite distance to the goal
+(`heur v = ⊤`) is disregarded: it is never inserted into the queue. -/
+@[simp]
+def hsearch_expandable (heur : V → ℕ∞) (v : V) : Prop := heur v ≠ ⊤
 
 def hsearch_step_expand
-    (heur : V → ℕ)
+    (heur : V → ℕ∞)
     (priorState : hsearch_search_state g)
     (stackHead : V)
     (stackTail : List V):
     (hsearch_search_state g) :=
-      -- all neighbours that either are *not visited yet* or are not on stack (to avoid dupliactes) and have shorter path via stackHead
+      -- all neighbours that either are *not visited yet* or are not on stack (to avoid dupliactes) and have shorter path via stackHead.
+      -- Neighbours whose heuristic value is `⊤` are disregarded: they are never added to the visited set nor to the queue.
       let newly_visited : Finset V := (Finset.univ).filterMap
         (λ v => if h : @decide (g.Adj stackHead v) (g.instDecAdj stackHead v) then
             let adj : g.Adj stackHead v := by simp_all only [decide_eq_true_eq]
-            if v ∉ priorState.visited ∨
-              (v ∈ priorState.visited ∧ v ∉ stackTail ∧ (priorState.pathOrder v).fst > (priorState.pathOrder stackHead).fst + g.edgeCost adj) then some v else none else none)
+            if heur v ≠ ⊤ ∧ (v ∉ priorState.visited ∨
+              (v ∈ priorState.visited ∧ v ∉ stackTail ∧ (priorState.pathOrder v).fst > (priorState.pathOrder stackHead).fst + g.edgeCost adj)) then some v else none else none)
         (by intro a a' b a_1 a_2; simp_all) -- filter neighbors to expand the visited list
 
       let vList : List V := (FinEnum.toList (Finset.univ : Finset V))
@@ -139,7 +152,7 @@ def hsearch_termination_metric
 --set_option trace.Meta.synthInstance true
 --set_option pp.all true
 
-variable (heur : V → ℕ)
+variable (heur : V → ℕ∞)
 
 
 section
@@ -233,10 +246,11 @@ lemma hsearch_expand_metric_reduction : WeightedDiGraph.termination_proof_for_ex
       simp at x
       apply List.exists_mem_of_length_pos at x
       simp at x
-      obtain ⟨v,⟨adj_head_v, prop_v⟩⟩ := x
+      obtain ⟨v,⟨v_heur_ne, prop_v⟩⟩ := x
       unfold hsearch_step_expand hsearch_termination_metric at eq
       simp at eq
       specialize eq v
+      obtain ⟨adj_head_v, prop_v⟩ := prop_v
       cases prop_v
       · simp_all
       · simp_all
@@ -318,19 +332,9 @@ lemma hsearch_expand_keeps_stack_in_visited
     WeightedDiGraph.search_invar_stack_is_visited priorState ∧
       stackHead ∈ priorState.visited ∧ (∀ x : V, x ∉ priorState.visited → x ∉ stackTail) →
       WeightedDiGraph.search_invar_stack_is_visited (hsearch_step_expand heur priorState stackHead stackTail) := by
-      intro ⟨ stack_is_visited_prior, stackhead_visited, x_not_in_stack_tail⟩
-      unfold WeightedDiGraph.search_invar_stack_is_visited
-      intro x x_now_on_stack
-      unfold hsearch_step_expand
-      simp_all
-      by_cases x_was_visited : x ∈ priorState.visited
-      · left
-        exact x_was_visited
-      · right
-        have adj : g.Adj stackHead x := by
-          apply (hsearch_expand_newly_added_are_adjacent heur priorState stackHead stackTail)
-          simp_all
-        use adj ; left ; exact x_was_visited
+  unfold hsearch_step_expand;
+  simp +zetaDelta at *;
+  grind
 
 
 lemma hsearch_expand_keeps_mother_in_visited
@@ -338,30 +342,9 @@ lemma hsearch_expand_keeps_mother_in_visited
     (stackHead : V)
     (stackTail : List V):
     WeightedDiGraph.search_invar_mother_is_visited priorState ∧ stackHead ∈ priorState.visited → WeightedDiGraph.search_invar_mother_is_visited (hsearch_step_expand heur priorState stackHead stackTail) := by
-      intro mother_is_visited_prior
-      unfold WeightedDiGraph.search_invar_mother_is_visited
-      intro x
-      by_cases mother_becomes_head : (hsearch_step_expand heur priorState stackHead stackTail).mother x = stackHead
-      · rw [mother_becomes_head]
-        unfold hsearch_step_expand
-        simp_all
-      · have x_was_visited : x.val ∈ priorState.visited := by
-          obtain ⟨ x', x_now_visi ⟩ := x
-          unfold hsearch_step_expand at mother_becomes_head x_now_visi
-          simp at x_now_visi
-          cases x_now_visi
-          · simp_all
-          · simp_all
-            rename_i h
-            obtain ⟨ adj, p ⟩ := h
-            cases p <;> simp_all
-        have mother_unchanged :
-          (hsearch_step_expand heur priorState stackHead stackTail).mother x = priorState.mother ⟨ x.val, x_was_visited ⟩ := by
-          unfold hsearch_step_expand at mother_becomes_head ⊢
-          simp_all
-        rw [mother_unchanged]
-        unfold hsearch_step_expand
-        simp_all
+  -- By definition of `hsearch_step_expand`, the mother of any vertex in the new state is either the stack head or the mother from the prior state.
+  unfold search_invar_mother_is_visited hsearch_step_expand;
+  grind
 
 
 lemma hsearch_expand_keeps_mother_is_adjacent
@@ -589,41 +572,14 @@ lemma hsearch_expand_keeps_on_stack_or_all_neighbours_visited
     (priorState : hsearch_search_state  g)
     (stackHead : V)
     (stackTail : List V):
-     WeightedDiGraph.search_invar_on_stack_or_all_neighbours_visited priorState
+     WeightedDiGraph.search_invar_on_stack_or_all_neighbours_visited (hsearch_expandable heur) priorState
      ∧ priorState.stack = (stackHead :: stackTail)
-     → WeightedDiGraph.search_invar_on_stack_or_all_neighbours_visited
+     → WeightedDiGraph.search_invar_on_stack_or_all_neighbours_visited (hsearch_expandable heur)
           (hsearch_step_expand heur priorState stackHead stackTail)
           := by
-      intro ⟨ invar_holds_on_prior_state, stack_composition ⟩
-      unfold WeightedDiGraph.search_invar_on_stack_or_all_neighbours_visited
-      intro ⟨ x, x_now_on_stack⟩
-      by_cases x_not_stack_head : x ≠ stackHead
-      · by_cases x_was_not_in_stack_tail_: x ∈ stackTail
-        · left
-          unfold hsearch_step_expand
-          simp_all
-        · by_cases x_not_visited : x ∉ priorState.visited
-          · left
-            unfold hsearch_step_expand
-            unfold hsearch_step_expand at x_now_on_stack
-            simp at x_now_on_stack
-            simp_all
-          · simp_all -- x was visited before and is not on the stack any more
-            right
-            intro y x_adj_y
-            unfold hsearch_step_expand
-            simp_all
-            left
-            have x_invar := invar_holds_on_prior_state x
-            simp_all
-      · simp_all
-        right
-        intro y x_adj_y
-        unfold hsearch_step_expand
-        simp_all
-        by_cases h : y ∈ priorState.visited
-        · left; exact h
-        · right; left; exact h
+  unfold hsearch_step_expand;
+  simp +zetaDelta at *;
+  grind
 
 lemma hsearch_expand_keeps_start_visited
     (start : V)
@@ -675,7 +631,7 @@ lemma hsearch_expand_goal_becomes_visited_puts_it_on_stack
 
 
 lemma hsearch_expand_keeps_base_invars:
-  WeightedDiGraph.base_invar_carries_over_expand (state_type := hsearch_search_state g) (hsearch_step_expand heur) goal (WeightedDiGraph.search_invar_all_basic (G:=g) (D:=ℕ×ℕ) start) := by
+  WeightedDiGraph.base_invar_carries_over_expand (state_type := hsearch_search_state g) (hsearch_step_expand heur) goal (WeightedDiGraph.search_invar_all_basic (G:=g) (D:=ℕ×ℕ) (hsearch_expandable heur) start) := by
   unfold WeightedDiGraph.base_invar_carries_over_expand
   unfold WeightedDiGraph.search_invar_all_basic
   intro s head tail ⟨ ⟨ i1,i2,i3,i4,i5,i6⟩ , head_not_goal, compose⟩
@@ -823,45 +779,36 @@ lemma hsearch_expand_keeps_on_path_order_diff(start goal : V)
 
 
 abbrev hsearch_invar_on_stack_or_all_neighbours_max_order (s : WeightedDiGraph.base_search_state g (ℕ×ℕ)):=
-  ∀ x : s.visited, ↑x ∉ s.stack → ∀ y : V, (adj : g.Adj x y) → (s.pathOrder y).1 ≤ (s.pathOrder x).1 + g.edgeCost adj
+  ∀ x : s.visited, ↑x ∉ s.stack → ∀ y : V, (adj : g.Adj x y) → heur y ≠ ⊤ → (s.pathOrder y).1 ≤ (s.pathOrder x).1 + g.edgeCost adj
 
+/-- Every visited node with a positive path-order cost has a finite heuristic value.
+The only visited node that may have heuristic `⊤` is the start node, whose path-order
+cost is `0`; every other node enters the visited set only through `newly_visited`,
+which filters out nodes with infinite heuristic. -/
+abbrev hsearch_invar_visited_heur_finite (s : WeightedDiGraph.base_search_state g (ℕ×ℕ)):=
+  ∀ a : V, a ∈ s.visited → (s.pathOrder a).1 ≠ 0 → heur a ≠ ⊤
+
+lemma hsearch_expand_keeps_visited_heur_finite
+    (priorState : hsearch_search_state g)
+    (stackHead : V)
+    (stackTail : List V):
+    hsearch_invar_visited_heur_finite heur priorState →
+      hsearch_invar_visited_heur_finite heur (hsearch_step_expand heur priorState stackHead stackTail) := by
+  grind +locals
 
 lemma hsearch_expand_keeps_on_stack_or_nei_max_order(goal : V)
-    (on_stack_or_nei_visited : WeightedDiGraph.search_invar_on_stack_or_all_neighbours_visited state)
+    (on_stack_or_nei_visited : WeightedDiGraph.search_invar_on_stack_or_all_neighbours_visited (hsearch_expandable heur) state)
+    (visited_heur_finite : hsearch_invar_visited_heur_finite heur state)
     :
      ∀ head : V, ∀ tail : List V,
-        hsearch_invar_on_stack_or_all_neighbours_max_order  state
+        hsearch_invar_on_stack_or_all_neighbours_max_order heur state
           ∧ head ≠ goal
           ∧ state.stack = head :: tail
-        → hsearch_invar_on_stack_or_all_neighbours_max_order  (hsearch_step_expand heur state head tail) := by
-      unfold hsearch_invar_on_stack_or_all_neighbours_max_order
-      simp
-      intro head tail prior_invar head_ne_goal compose a a_visited_after a_not_on_stack_after y a_adj_y
-
-      unfold hsearch_step_expand at a_visited_after a_not_on_stack_after
-      simp at a_visited_after a_not_on_stack_after
-      obtain ⟨ a_not_in_tail, a_visi_if_head_adj ⟩ := a_not_on_stack_after
-      cases a_visited_after
-      · next a_visited_before =>
-        by_cases a_eq_head : a = head
-        · subst a_eq_head
-          by_cases y_visited_before : y ∈ state.visited
-          · unfold hsearch_step_expand
-            simp [y_visited_before, a_visited_before]
-            split_ifs <;> grind
-          · unfold hsearch_step_expand
-            simp [y_visited_before, a_visited_before]
-            grind
-        · by_cases y_visited_before : y ∈ state.visited
-          · unfold hsearch_step_expand
-            simp [y_visited_before, a_visited_before]
-            split_ifs <;> grind
-          · unfold hsearch_step_expand
-            simp [y_visited_before, a_visited_before]
-            split <;> (simp_all ; grind)
-      · next both =>
-        obtain ⟨ head_adj_a, a_ne_visited ⟩ := both
-        grind -- contradictory
+        → hsearch_invar_on_stack_or_all_neighbours_max_order heur (hsearch_step_expand heur state head tail) := by
+  simp +zetaDelta at *;
+  intro head tail h1 h2 h3 a ha1 ha2 y hy1 hy2;
+  unfold hsearch_step_expand at ha1 ha2 ⊢; simp_all +decide ;
+  grind
 
 
 

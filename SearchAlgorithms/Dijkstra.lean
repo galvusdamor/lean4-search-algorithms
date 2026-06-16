@@ -13,7 +13,7 @@ open WeightedDiGraph
 /-! ## Dijkstra implementation and proof -/
 
 @[simp]
-def h_zero (_ : V) : ℕ := 0
+def h_zero (_ : V) : ℕ∞ := 0
 
 def dijkstra (start : V) (goal : V): Option (g.Path start goal) :=
   let start_state := WeightedDiGraph.base_search_state_initial start ⟨0,0⟩
@@ -33,12 +33,15 @@ theorem dijkstra_is_sound (start : V) (goal : V) :
 
 theorem dijkstra_is_complete (start : V) (goal : V):
     ((∃ x : (g.Path start goal), x = x) → Option.isSome (dijkstra (g:=g) start goal)) := by
-  apply WeightedDiGraph.search_with_stack_step_is_complete
-  · apply hsearch_expand_metric_reduction
-  · apply hsearch_expand_keeps_base_invars
-  · rfl
-  · apply hsearch_expand_keeps_goal_on_stack
-  · apply hsearch_expand_goal_becomes_visited_puts_it_on_stack
+  intro hpath
+  obtain ⟨p, _⟩ := hpath
+  apply WeightedDiGraph.search_with_stack_step_is_complete (expandable := hsearch_expandable h_zero)
+    (metric_for_expand_proof := hsearch_expand_metric_reduction h_zero)
+    (invar_carries := hsearch_expand_keeps_base_invars h_zero)
+    (start_is_base_init := rfl)
+    (goal_on_stack_carries_expand := hsearch_expand_keeps_goal_on_stack h_zero)
+    (goal_trigger := hsearch_expand_goal_becomes_visited_puts_it_on_stack h_zero goal)
+  exact ⟨p, fun u _ => by simp⟩
 
 /-! ## Invariants for Dijkstra -/
 
@@ -66,10 +69,10 @@ abbrev search_invar_stack_nodup (s : WeightedDiGraph.base_search_state g (ℕ×�
       ∀ v : V, s.stack.count v ≤ 1
 
 abbrev dijkstra_all_invar (start : V) (s : WeightedDiGraph.base_search_state g (ℕ×ℕ)) :=
-      WeightedDiGraph.search_invar_all_basic start s
+      WeightedDiGraph.search_invar_all_basic (hsearch_expandable h_zero) start s
     ∧ dijkstra_stack_shortest_path start s
     ∧ hsearch_path_order_diff_by_edge_cost start s
-    ∧ hsearch_invar_on_stack_or_all_neighbours_max_order s
+    ∧ hsearch_invar_on_stack_or_all_neighbours_max_order h_zero s
     ∧ dijkstra_stack_sorted s
     ∧ hsearch_invar_start_path_order_zero_zero start s
     ∧ search_invar_start_not_mem_tail start s
@@ -299,7 +302,7 @@ lemma dijkstra_new_head_cost_lt_other_on_stack_now
 
 omit [DecidableEq V] in
 private lemma track_walk_not_on_stack
-  (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited state)
+  (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited (hsearch_expandable h_zero) state)
   (start_visited : search_invar_start_visited start state)
   (w_w : g.Walk start w)
   (w_nodup : w_w.support.Nodup)
@@ -342,7 +345,7 @@ private lemma track_walk_not_on_stack
 
 omit [DecidableEq V] in
 private lemma track_path_not_on_stack
-  (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited state)
+  (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited (hsearch_expandable h_zero) state)
   (start_visited : search_invar_start_visited start state)
   (p_w : g.Path start w)
   (no_pw_mem_on_stack : ∀ x ∈ p_w.support, x ∉ state.stack):
@@ -375,8 +378,8 @@ private lemma dijkstra_shorter_path_first_on_stack_not_head {start : V}
 (v : V)
 (u : V)
 (start_visited : search_invar_start_visited start state)
-(on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited state)
-(update_invar : hsearch_invar_on_stack_or_all_neighbours_max_order state)
+(on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited (hsearch_expandable h_zero) state)
+(update_invar : hsearch_invar_on_stack_or_all_neighbours_max_order h_zero state)
 (start_not_mem_tail : search_invar_start_not_mem_tail start state)
 (head : V)
 (tail : List V)
@@ -477,7 +480,7 @@ private lemma dijkstra_shorter_path_first_on_stack_not_head {start : V}
     · apply add_le_add_left
       apply w_sp
     · unfold hsearch_invar_on_stack_or_all_neighbours_max_order at update_invar
-      specialize update_invar ⟨ w, w_visited ⟩ w_not_on_stack u adj_w_u
+      specialize update_invar ⟨ w, w_visited ⟩ w_not_on_stack u adj_w_u (by simp)
       omega
 
   have p'_lt_mp_plus_e : p'.cost < path_mother.cost + e := by
@@ -499,7 +502,7 @@ private lemma dijkstra_shorter_path_with_optimal_node_and_adj_on_stack
   (head : V)
   (tail : List V)
   (compose : state.stack = head :: tail)
-  (update_invar : hsearch_invar_on_stack_or_all_neighbours_max_order state)
+  (update_invar : hsearch_invar_on_stack_or_all_neighbours_max_order h_zero state)
   (p_path_cost : p.val.cost ≤ ((hsearch_step_expand h_zero state head tail).pathOrder v).1)
   (stack_not_empty_after : ¬(hsearch_step_expand h_zero state head tail).stack = [])
   (head_after_is_v : (hsearch_step_expand h_zero state head tail).stack.head stack_not_empty_after = v)
@@ -554,7 +557,7 @@ private lemma dijkstra_shorter_path_with_optimal_node_and_adj_on_stack
           grind
         · apply le_trans
           · apply h5
-          · specialize update_invar ⟨ u, u_visited ⟩ (by grind) u' adj_u_u'
+          · specialize update_invar ⟨ u, u_visited ⟩ (by grind) u' adj_u_u' (by simp)
             simp only at update_invar
             rw [add_comm]
             exact update_invar
@@ -564,9 +567,9 @@ private lemma dijkstra_shorter_path_with_optimal_node_and_adj_on_stack
 
 private lemma dijkstra_shorter_path_via_head
       (start : V)
-      (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited state)
+      (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited (hsearch_expandable h_zero) state)
       (stack_visited_invar : search_invar_stack_is_visited state)
-      (update_invar : hsearch_invar_on_stack_or_all_neighbours_max_order state)
+      (update_invar : hsearch_invar_on_stack_or_all_neighbours_max_order h_zero state)
       (stack_nodup : search_invar_stack_nodup state)
       (head : V)
       (tail : List V)
@@ -629,7 +632,7 @@ private lemma dijkstra_shorter_path_via_head
                   -- possibly stronger: the all elements are also visited!
                   (∃ w ∈ u'_v.val.support, w ∈ state.stack ∧ w ≠ v ∧ (u'_v.support.takeWhile (· ≠ w)).all (· ∉ state.stack)) ∨
                     (v ∈ state.visited ∧ ∀ w ∈ u'_v.val.support, w ≠ v → w ∉ state.stack ∧ w ∈ state.visited) :=
-                  run_path_through_state_yields_node_on_stack_or_all_visited u' v v_not_u' u'_v state u'_visited on_stack_or_nei_visited
+                  run_path_through_state_yields_node_on_stack_or_all_visited u' v v_not_u' u'_v state u'_visited on_stack_or_nei_visited (fun u _ => by simp)
 
 
                 cases u'_v_elem_on_stack_or_v_visited
@@ -745,7 +748,7 @@ private lemma dijkstra_shorter_path_via_head
 
                     -- last is visited, but not on stack, no must have been expanded
                     have last_expanded : (state.pathOrder last).1 + edgeCost last_adj_v ≥ (state.pathOrder v).1 := by
-                      specialize update_invar ⟨last, last_visited⟩ last_not_mem_stack v last_adj_v
+                      specialize update_invar ⟨last, last_visited⟩ last_not_mem_stack v last_adj_v (by simp)
                       exact update_invar
 
                     let w_start_last : g.Walk start last := (s_u.val.concat adj_head_u').append path_u'_last
@@ -864,8 +867,8 @@ private lemma dijkstra_shorter_path_via_head
 lemma dijkstra_path_head_adj_new_head_is_cheapest {start : V}
     (start_visited : start ∈ state.visited)
     (stack_visited_invar : WeightedDiGraph.search_invar_stack_is_visited state)
-    (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited state)
-    (update_invar : hsearch_invar_on_stack_or_all_neighbours_max_order state)
+    (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited (hsearch_expandable h_zero) state)
+    (update_invar : hsearch_invar_on_stack_or_all_neighbours_max_order h_zero state)
     (prior_invar : dijkstra_stack_shortest_path start state)
     (start_not_mem_tail : search_invar_start_not_mem_tail start state)
     (stack_nodup : search_invar_stack_nodup state)
@@ -909,7 +912,7 @@ lemma dijkstra_path_head_adj_new_head_is_cheapest {start : V}
         -- possibly stronger: the all elements are also visited!
         (∃ u ∈ p'.val.support, u ∈ state.stack ∧ u ≠ v ∧ (p'.support.takeWhile (· ≠ u)).all (· ∉ state.stack)) ∨
           (v ∈ state.visited ∧ ∀ u ∈ p'.val.support, u ≠ v → u ∉ state.stack ∧ u ∈ state.visited) :=
-        run_path_through_state_yields_node_on_stack_or_all_visited start v v_not_start p' state start_visited on_stack_or_nei_visited
+        run_path_through_state_yields_node_on_stack_or_all_visited start v v_not_start p' state start_visited on_stack_or_nei_visited (fun u _ => by simp)
       -- p' must be cheaper than the cost of path_to_v -- which is path_to_head.cost + e (by construction)
       -- Eq 1: by expand p'_is_cheaper
       have su_lt_sh_e : p'.cost < path_to_head.cost + e := by
@@ -990,10 +993,10 @@ lemma dijkstra_path_mother_adj_new_head_is_cheapest {start : V}
     (mother_invar_adj : search_invar_mother_is_adjacent start state)
     (decreasing_invar : search_invar_mother_decreasing_path_order start state)
     (start_visited : search_invar_start_visited start state)
-    (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited state)
+    (on_stack_or_nei_visited : search_invar_on_stack_or_all_neighbours_visited (hsearch_expandable h_zero) state)
     (stack_visited_invar : search_invar_stack_is_visited state)
     (path_order_diff : hsearch_path_order_diff_by_edge_cost start state)
-    (update_invar : hsearch_invar_on_stack_or_all_neighbours_max_order state)
+    (update_invar : hsearch_invar_on_stack_or_all_neighbours_max_order h_zero state)
     (start_not_mem_tail : search_invar_start_not_mem_tail start state)
     (stack_nodup : search_invar_stack_nodup state)
     (head : V)
@@ -1030,7 +1033,7 @@ lemma dijkstra_path_mother_adj_new_head_is_cheapest {start : V}
         -- possibly stronger: the all elements are also visited!
         (∃ u ∈ p'.val.support, u ∈ state.stack ∧ u ≠ v ∧ (p'.support.takeWhile (· ≠ u)).all (· ∉ state.stack)) ∨
           (v ∈ state.visited ∧ ∀ u ∈ p'.val.support, u ≠ v → u ∉ state.stack ∧ u ∈ state.visited) :=
-        run_path_through_state_yields_node_on_stack_or_all_visited start v v_not_start p' state start_visited on_stack_or_nei_visited
+        run_path_through_state_yields_node_on_stack_or_all_visited start v v_not_start p' state start_visited on_stack_or_nei_visited (fun u _ => by simp)
 
       have h1 : path_mother.cost + edgeCost adj_mother_v ≤ (state.pathOrder v).1:= by
         convert mother_and_edge_smaller_order_before
@@ -1113,12 +1116,12 @@ lemma dijkstra_expand_keeps_shortest_path_invar
     (mother_invar_adj : WeightedDiGraph.search_invar_mother_is_adjacent start state)
     (decreasing_invar : WeightedDiGraph.search_invar_mother_decreasing_path_order start state)
     (start_visited : WeightedDiGraph.search_invar_start_visited start state)
-    (on_stack_or_nei_visited : WeightedDiGraph.search_invar_on_stack_or_all_neighbours_visited state)
+    (on_stack_or_nei_visited : WeightedDiGraph.search_invar_on_stack_or_all_neighbours_visited (hsearch_expandable h_zero) state)
     (stack_visited_invar : WeightedDiGraph.search_invar_stack_is_visited state)
     -- new bfs_ specific invars
     (path_order_diff : hsearch_path_order_diff_by_edge_cost start state)
     --(extract_length_invar : dijkstra_path_as_extracted_as_long_as_sort_index start state)
-    (update_invar : hsearch_invar_on_stack_or_all_neighbours_max_order state)
+    (update_invar : hsearch_invar_on_stack_or_all_neighbours_max_order h_zero state)
     (start_path_order : hsearch_invar_start_path_order_zero_zero start state)
     (start_not_mem_tail : search_invar_start_not_mem_tail start state)
     (stack_nodup : search_invar_stack_nodup state)
@@ -1299,7 +1302,7 @@ lemma dijkstra_expand_keeps_shortest_path_invar
 
                 have v_updated_from_w : (state.pathOrder v).1 ≤ (state.pathOrder w).1 + edgeCost w_adj_v := by
                   unfold hsearch_invar_on_stack_or_all_neighbours_max_order at update_invar
-                  specialize update_invar ⟨ w, w_visited ⟩  w_ne_mem_stack v w_adj_v
+                  specialize update_invar ⟨ w, w_visited ⟩  w_ne_mem_stack v w_adj_v (by simp)
                   exact update_invar
 
                 conv at p_lt_ph_e => left ; unfold Path.cost
@@ -1510,7 +1513,7 @@ lemma dijkstra_expand_keeps_shortest_path_invar
                   apply hsearch_path_extracted_not_longer_than_path_order
                   exact original_path_order_diff
               · unfold hsearch_invar_on_stack_or_all_neighbours_max_order at update_invar
-                specialize update_invar ⟨ the_mother, mother_visited ⟩ mother_not_on_stack v adj_mother_v
+                specialize update_invar ⟨ the_mother, mother_visited ⟩ mother_not_on_stack v adj_mother_v (by simp)
                 rw [add_comm]
                 apply le_trans
                 · apply update_invar
@@ -1577,7 +1580,7 @@ lemma dijkstra_expand_keeps_shortest_path_invar
 
                 have v_updated_from_w : (state.pathOrder v).1 ≤ (state.pathOrder w).1 + edgeCost w_adj_v := by
                   unfold hsearch_invar_on_stack_or_all_neighbours_max_order at update_invar
-                  specialize update_invar ⟨ w, w_visited ⟩  w_ne_mem_stack v w_adj_v
+                  specialize update_invar ⟨ w, w_visited ⟩  w_ne_mem_stack v w_adj_v (by simp)
                   exact update_invar
 
                 conv at p_lt_ph_e => left ; unfold Path.cost
@@ -1683,6 +1686,7 @@ lemma dijkstra_expand_carries_all_dijkstra_invars (start : V) (goal : V):
           · exact ⟨ invar_before.right.right.left, head_ne_goal, compose⟩
         · apply hsearch_expand_keeps_on_stack_or_nei_max_order
           · exact invar_before.left.right.right.right.right.left
+          · intro a _ _; simp
           · exact ⟨ invar_before.right.right.right.left, head_ne_goal, compose⟩
         · apply dijkstra_expand_keeps_stack_sorted
           · exact ⟨ invar_before.right.right.right.right.left, head_ne_goal, compose⟩
