@@ -1108,7 +1108,475 @@ lemma dijkstra_path_mother_adj_new_head_is_cheapest {start : V}
         simp_all
 
 
-set_option maxHeartbeats 2000000000 in
+/-- Auxiliary fact for `dijkstra_expand_keeps_shortest_path_invar`: in the case where a
+previously visited node `v` keeps its mother across the expansion of `head`, that mother is
+not on the (pre-expansion) stack. This is the part of the case analysis that has to reason
+about the `mergeSort`ed post-expansion stack, so it is factored out here. -/
+lemma dijkstra_expand_mother_not_on_stack
+    (start head : V) (tail : List V)
+    (decreasing_invar : WeightedDiGraph.search_invar_mother_decreasing_path_order start state)
+    (compose : state.stack = head :: tail)
+    (v : V) (v_visited : v ∈ state.visited) (v_not_start : v ≠ start)
+    (v_visited_after : v ∈ (hsearch_step_expand h_zero state head tail).visited)
+    (the_mother : V) (hm : the_mother = state.mother ⟨v, v_visited⟩)
+    (mother_visited : the_mother ∈ state.visited)
+    (mother_same :
+      (hsearch_step_expand h_zero state head tail).mother ⟨v, v_visited_after⟩ = the_mother)
+    (mother_ne_head : the_mother ≠ head)
+    (stack_not_empty_after : (hsearch_step_expand h_zero state head tail).stack ≠ [])
+    (head_after_is_v :
+      (hsearch_step_expand h_zero state head tail).stack.head stack_not_empty_after = v) :
+    the_mother ∉ state.stack := by
+  -- If `the_mother` were still on the stack, it would survive the expansion, and since `v`
+  -- is the (minimal) head of the re-sorted stack, the merge comparator forces a contradiction
+  -- with `decreasing_invar` (`the_mother` strictly precedes `v`).
+  contrapose! head_after_is_v
+  intro h
+  unfold hsearch_step_expand at mother_same
+  simp_all
+  apply mergeSort_head_from_head_unsorted at h
+  · specialize h the_mother
+    simp_all +decide [FValueComp.lt]
+    grind
+  · intros; apply hsearch_merge_trans <;> assumption
+  · intros; apply hsearch_merge_total
+
+
+
+/-- `dijkstra_expand_keeps_shortest_path_invar`, case where the freshly-popped node `v`
+was already visited and adopts `head` as its (new) mother during the expansion. -/
+lemma dijkstra_expand_shortest_path_mother_is_head
+    (start head : V) (tail : List V)
+    (mother_invar : WeightedDiGraph.search_invar_mother_is_visited state)
+    (mother_invar_adj : WeightedDiGraph.search_invar_mother_is_adjacent start state)
+    (decreasing_invar : WeightedDiGraph.search_invar_mother_decreasing_path_order start state)
+    (start_visited : WeightedDiGraph.search_invar_start_visited start state)
+    (on_stack_or_nei_visited :
+      WeightedDiGraph.search_invar_on_stack_or_all_neighbours_visited (hsearch_expandable h_zero) state)
+    (stack_visited_invar : WeightedDiGraph.search_invar_stack_is_visited state)
+    (path_order_diff : hsearch_path_order_diff_by_edge_cost start state)
+    (update_invar : hsearch_invar_on_stack_or_all_neighbours_max_order h_zero state)
+    (start_not_mem_tail : search_invar_start_not_mem_tail start state)
+    (stack_nodup : search_invar_stack_nodup state)
+    (prior_invar : dijkstra_stack_shortest_path start state)
+    (compose : state.stack = head :: tail)
+    (head_was_visited_before : head ∈ state.visited)
+    (v : V) (v_not_start : v ≠ start)
+    (v_visited_after : v ∈ (hsearch_step_expand h_zero state head tail).visited)
+    (stack_not_empty_after : (hsearch_step_expand h_zero state head tail).stack ≠ [])
+    (head_after_is_v :
+      (hsearch_step_expand h_zero state head tail).stack.head stack_not_empty_after = v)
+    (v_visited : v ∈ state.visited)
+    (mother_is_head :
+      (hsearch_step_expand h_zero state head tail).mother ⟨v, v_visited_after⟩ = head) :
+    g.cost_is start v ((hsearch_step_expand h_zero state head tail).pathOrder v).1 := by
+  let path_to_head : g.Path start head :=
+    (extract_path_to start head state head_was_visited_before mother_invar mother_invar_adj decreasing_invar).1
+  have ph_eq_dh : path_to_head.cost = (state.pathOrder head).1 := by
+    unfold dijkstra_stack_shortest_path at prior_invar
+    apply eq_of_le_of_ge
+    · apply hsearch_path_extracted_not_longer_than_path_order
+      exact path_order_diff
+    · specialize prior_invar head head_was_visited_before
+      simp_all
+      unfold cost_is at prior_invar
+      obtain ⟨hp, ⟨ hp_cost, hp_cheapest ⟩ ⟩ := prior_invar
+      unfold Path.is_cheapest at hp_cheapest
+      specialize hp_cheapest path_to_head
+      rw [hp_cost] at hp_cheapest
+      simp_all
+  have support_visited : ∀ u ∈ path_to_head.val.support, u ∈ state.visited := by
+    apply support_of_path_visited
+    unfold path_to_head
+    rfl
+  unfold cost_is
+  have adj_head_v : g.Adj head v := by
+    unfold hsearch_step_expand at mother_is_head
+    unfold search_invar_mother_is_adjacent at mother_invar_adj
+    specialize mother_invar_adj ⟨ v, v_visited ⟩ v_not_start
+    grind
+
+  have v_ne_head : v ≠ head := by
+    by_contra v_eq_head
+    subst v_eq_head
+    unfold hsearch_step_expand at mother_is_head
+    unfold search_invar_mother_decreasing_path_order at decreasing_invar
+    specialize decreasing_invar ⟨ v, v_visited ⟩ v_not_start
+    simp_all
+    apply FValueComp.lt_irr (state.pathOrder v) decreasing_invar
+
+  let e := edgeCost adj_head_v
+  have v_order_eq_head_plus_edge : ((hsearch_step_expand h_zero state head tail).pathOrder v).1 = ((hsearch_step_expand h_zero state head tail).pathOrder head).1 + e := by
+    unfold hsearch_step_expand at mother_is_head ⊢
+    simp_all
+    grind
+
+  have v_not_mem_ph_support : v ∉ ↑path_to_head.val.support := by
+    by_contra v_in_support
+    have h := (extract_path_to start head state head_was_visited_before mother_invar mother_invar_adj decreasing_invar).2
+    specialize h v (by apply v_in_support) v_ne_head
+    unfold hsearch_step_expand at v_order_eq_head_plus_edge mother_is_head
+    simp_all
+    have v_visited : v ∈ state.visited := by grind
+    unfold search_invar_mother_decreasing_path_order at decreasing_invar
+    specialize decreasing_invar ⟨ v, v_visited ⟩ v_not_start
+    split_ifs at v_order_eq_head_plus_edge <;> (try  grind)
+    · simp_all
+      have order_eq := FValueComp.lt_antisymm (state.pathOrder head) (state.pathOrder v) decreasing_invar h
+      rw [order_eq] at h
+      apply FValueComp.lt_irr (state.pathOrder v) h
+    · simp_all
+      have order_eq := FValueComp.lt_antisymm (state.pathOrder head) (state.pathOrder v) decreasing_invar h
+      rw [order_eq] at h
+      apply FValueComp.lt_irr (state.pathOrder v) h
+    · simp_all
+      have order_eq := FValueComp.lt_antisymm (state.pathOrder head) (state.pathOrder v) decreasing_invar h
+      rw [order_eq] at h
+      apply FValueComp.lt_irr (state.pathOrder v) h
+    all_goals
+      rename_i a b c
+      unfold edgeCost at c v_order_eq_head_plus_edge
+      unfold FValueComp.lt Nat.instFValueCompProd at h
+      simp_all
+      apply Prod.lex_iff.mp at h
+      cases h
+      · grind
+      next prop =>
+        obtain ⟨ eq, lt ⟩ := prop
+        have e_zero : e = 0 := by omega
+        simp_all
+        have o_eq : state.pathOrder v = ((state.pathOrder head).1, (state.pathOrder head).2 + 1) := by grind
+        specialize mother_is_head o_eq
+        grind
+
+  let path_to_v : g.Path start v := path_to_head.concat adj_head_v v_not_mem_ph_support
+
+  use path_to_v
+  constructor
+  · -- the cost of `path_to_v` is `path_to_head.cost + e`; rewrite both sides to
+    -- `(state.pathOrder head).1 + e` using `ph_eq_dh`, `v_order_eq_head_plus_edge` and the
+    -- fact that the expansion leaves `head`'s order unchanged.
+    unfold path_to_v
+    rw [WeightedDiGraph.Path.concat_inc_cost_by_edge, ph_eq_dh, v_order_eq_head_plus_edge,
+      hsearch_expand_head_order_stays h_zero state head tail head_was_visited_before]
+    unfold e
+    omega
+  · apply dijkstra_path_head_adj_new_head_is_cheapest <;> try assumption
+    · intro p_start_v ⟨p_lt_ph_e,v_visited,cond3⟩
+      obtain ⟨ w,path_start_w,w_adj_v,v_not_earlier_in_path,p_start_v_compose⟩ := p_start_v.split_at_end (Ne.symm v_not_start)
+
+      have w_ne_v : w ≠ v := by
+        by_contra w_eq_v
+        rw [← w_eq_v] at v_not_earlier_in_path
+        have w_in_supp : w ∈ path_start_w.val.support := Path.goal_in_support path_start_w
+        contradiction
+
+
+      have p_start_v_cost : p_start_v.val.cost = edgeCost w_adj_v + path_start_w.val.cost := by
+        rw [p_start_v_compose] ; simp
+
+      have w_in_supp : w ∈ p_start_v.val.support := by rw [p_start_v_compose] ; simp
+      have w_visited : w ∈ state.visited := by specialize cond3 w w_in_supp w_ne_v ; exact cond3.right
+      have w_ne_mem_stack : w ∉ state.stack := by specialize cond3 w w_in_supp w_ne_v ; exact cond3.left
+
+      have w_order_eq : (state.pathOrder w).1 ≤ path_start_w.val.cost := by
+        have prior_w := prior_invar w w_visited (Or.inl w_ne_mem_stack)
+        unfold cost_is at prior_w
+        obtain ⟨sp, ⟨ cost_eq_order, cheapest⟩ ⟩ := prior_w
+        unfold Path.is_cheapest at cheapest
+        specialize cheapest path_start_w
+        rw [cost_eq_order] at cheapest
+        apply cheapest
+
+      have v_updated_from_w : (state.pathOrder v).1 ≤ (state.pathOrder w).1 + edgeCost w_adj_v := by
+        unfold hsearch_invar_on_stack_or_all_neighbours_max_order at update_invar
+        specialize update_invar ⟨ w, w_visited ⟩  w_ne_mem_stack v w_adj_v (by simp)
+        exact update_invar
+
+      conv at p_lt_ph_e => left ; unfold Path.cost
+
+
+      have t_1 : (state.pathOrder v).1 ≤ path_start_w.val.cost + edgeCost w_adj_v := by omega
+      have t_2 : (state.pathOrder v).1 ≤ p_start_v.val.cost := by omega
+      have t_3 : (state.pathOrder v).1 < (path_to_head.concat adj_head_v v_not_mem_ph_support).cost := by omega
+      unfold Path.concat at t_3
+      simp at t_3
+      unfold Path.cost at ph_eq_dh
+      rw [ph_eq_dh] at t_3
+      -- `v`'s new order is `head`'s order plus the edge, and the expansion only lowers orders,
+      -- so `(state.pathOrder head).1 + e ≤ (state.pathOrder v).1`, contradicting `t_3`.
+      have hv : ((hsearch_step_expand h_zero state head tail).pathOrder v).1
+          = (state.pathOrder head).1 + edgeCost adj_head_v := by
+        rw [v_order_eq_head_plus_edge,
+          hsearch_expand_head_order_stays h_zero state head tail head_was_visited_before]
+      have hmono := pathOrder_mono_after_expand (state := state) (heur := h_zero) head tail v v_visited
+      omega
+
+/-- `dijkstra_expand_keeps_shortest_path_invar`, case where the freshly-popped node `v`
+was already visited and keeps its previous mother across the expansion of `head`. -/
+lemma dijkstra_expand_shortest_path_mother_same
+    (start head : V) (tail : List V)
+    (mother_invar : WeightedDiGraph.search_invar_mother_is_visited state)
+    (mother_invar_adj : WeightedDiGraph.search_invar_mother_is_adjacent start state)
+    (decreasing_invar : WeightedDiGraph.search_invar_mother_decreasing_path_order start state)
+    (start_visited : WeightedDiGraph.search_invar_start_visited start state)
+    (on_stack_or_nei_visited :
+      WeightedDiGraph.search_invar_on_stack_or_all_neighbours_visited (hsearch_expandable h_zero) state)
+    (stack_visited_invar : WeightedDiGraph.search_invar_stack_is_visited state)
+    (path_order_diff : hsearch_path_order_diff_by_edge_cost start state)
+    (update_invar : hsearch_invar_on_stack_or_all_neighbours_max_order h_zero state)
+    (start_not_mem_tail : search_invar_start_not_mem_tail start state)
+    (stack_nodup : search_invar_stack_nodup state)
+    (prior_invar : dijkstra_stack_shortest_path start state)
+    (compose : state.stack = head :: tail)
+    (head_was_visited_before : head ∈ state.visited)
+    (v : V) (v_not_start : v ≠ start)
+    (v_visited_after : v ∈ (hsearch_step_expand h_zero state head tail).visited)
+    (stack_not_empty_after : (hsearch_step_expand h_zero state head tail).stack ≠ [])
+    (head_after_is_v :
+      (hsearch_step_expand h_zero state head tail).stack.head stack_not_empty_after = v)
+    (v_visited : v ∈ state.visited)
+    (mother_same :
+      (hsearch_step_expand h_zero state head tail).mother ⟨v, v_visited_after⟩
+        = state.mother ⟨v, v_visited⟩)
+    (mother_ne_head : state.mother ⟨v, v_visited⟩ ≠ head) :
+    g.cost_is start v ((hsearch_step_expand h_zero state head tail).pathOrder v).1 := by
+  let path_to_head : g.Path start head :=
+    (extract_path_to start head state head_was_visited_before mother_invar mother_invar_adj decreasing_invar).1
+  have ph_eq_dh : path_to_head.cost = (state.pathOrder head).1 := by
+    unfold dijkstra_stack_shortest_path at prior_invar
+    apply eq_of_le_of_ge
+    · apply hsearch_path_extracted_not_longer_than_path_order
+      exact path_order_diff
+    · specialize prior_invar head head_was_visited_before
+      simp_all
+      unfold cost_is at prior_invar
+      obtain ⟨hp, ⟨ hp_cost, hp_cheapest ⟩ ⟩ := prior_invar
+      unfold Path.is_cheapest at hp_cheapest
+      specialize hp_cheapest path_to_head
+      rw [hp_cost] at hp_cheapest
+      simp_all
+  have support_visited : ∀ u ∈ path_to_head.val.support, u ∈ state.visited := by
+    apply support_of_path_visited
+    unfold path_to_head
+    rfl
+  unfold cost_is
+  let the_mother := state.mother ⟨v, v_visited⟩
+  have mother_visited : the_mother ∈ state.visited := by
+    unfold search_invar_mother_is_visited at mother_invar
+    specialize mother_invar ⟨ v, v_visited ⟩
+    grind
+  have pathOrder_unchanged : (hsearch_step_expand h_zero state head tail).pathOrder v = state.pathOrder v := by
+    unfold hsearch_step_expand at mother_same ⊢
+    grind
+  have adj_mother_v : g.Adj the_mother v := by
+    unfold search_invar_mother_is_adjacent at mother_invar_adj
+    specialize mother_invar_adj ⟨ v, v_visited ⟩
+    grind
+
+  have mother_and_edge_smaller_order_before : (state.pathOrder the_mother).1 + edgeCost adj_mother_v ≤ (state.pathOrder v).1 := by
+    unfold hsearch_path_order_diff_by_edge_cost at path_order_diff
+    specialize path_order_diff mother_invar_adj v v_visited v_not_start
+    unfold the_mother
+    grind
+
+  have pathOrder_mother_decreases : ((hsearch_step_expand h_zero state head tail).pathOrder the_mother).1 ≤ (state.pathOrder the_mother).1 := by
+    unfold hsearch_step_expand
+    simp_all
+    grind
+
+
+  have mother_not_on_stack : the_mother ∉ state.stack :=
+    dijkstra_expand_mother_not_on_stack state start head tail decreasing_invar compose v
+      v_visited v_not_start v_visited_after the_mother rfl mother_visited mother_same
+      mother_ne_head stack_not_empty_after head_after_is_v
+  -- path to v is the path it was before. This will be a path to its mother and then that edge
+  let path_mother := (extract_path_to start the_mother state mother_visited mother_invar mother_invar_adj decreasing_invar).1
+
+
+  have v_not_in_mother_path : v ∉ path_mother.val.support := by
+    intro v_in_path_mother
+    have path_order := (extract_path_to start the_mother state mother_visited
+      mother_invar mother_invar_adj decreasing_invar).2
+    -- v ≠ the_mother (since pathOrderstart_not_mem_tail the_mother ≺ pathOrder v, so they differ)
+    have v_ne_mother : v ≠ the_mother := by
+      intro h--; subst h
+      have decr := decreasing_invar ⟨v, v_visited⟩ v_not_start
+      simp at decr
+      nth_rewrite 2 [h] at decr
+      exact FValueComp.lt_irr _ decr
+    -- extract_path_to .2: pathOrder v ≺ pathOrder the_mother
+    have pv_lt_pm := path_order v v_in_path_mother v_ne_mother
+    -- decreasing_invar: pathOrder the_mother ≺ pathOrder v
+    have pm_lt_pv := decreasing_invar ⟨v, v_visited⟩ v_not_start
+    -- cycle: pathOrder v ≺ pathOrder the_mother ≺ pathOrder v
+    exact FValueComp.lt_irr _ (FValueComp.lt_trans _ _ _ pv_lt_pm pm_lt_pv)
+  let path_mother_v := path_mother.concat adj_mother_v v_not_in_mother_path
+
+  use path_mother_v
+  constructor
+  · rw [pathOrder_unchanged]
+    unfold path_mother_v
+    rw [Path.concat_inc_cost_by_edge]
+    apply eq_of_le_of_ge
+    · have original_path_order_diff := path_order_diff
+      unfold hsearch_path_order_diff_by_edge_cost at path_order_diff
+      specialize path_order_diff mother_invar_adj v v_visited v_not_start
+      apply le_trans ; rotate_left
+      · apply path_order_diff
+      · nth_rewrite 1 [add_comm]
+        apply add_le_add_left
+        unfold path_mother
+        apply hsearch_path_extracted_not_longer_than_path_order
+        exact original_path_order_diff
+    · unfold hsearch_invar_on_stack_or_all_neighbours_max_order at update_invar
+      specialize update_invar ⟨ the_mother, mother_visited ⟩ mother_not_on_stack v adj_mother_v (by simp)
+      rw [add_comm]
+      apply le_trans
+      · apply update_invar
+      · apply add_le_add_left
+        unfold dijkstra_stack_shortest_path at prior_invar
+        specialize prior_invar the_mother
+        simp_all
+        unfold cost_is at prior_invar
+        obtain ⟨ p, p_cost, is_cheapest ⟩ := prior_invar
+        unfold Path.is_cheapest at is_cheapest
+        specialize is_cheapest path_mother
+        unfold Path.cost at is_cheapest p_cost
+        convert is_cheapest
+        exact p_cost.symm
+  · unfold Path.is_cheapest
+    intro p'
+    by_contra p'_cheaper; simp at p'_cheaper
+    have pm_eq_dm : path_mother.val.cost = (state.pathOrder the_mother).1 := by
+      apply eq_of_le_of_ge
+      · apply hsearch_path_extracted_not_longer_than_path_order
+        assumption
+      · specialize prior_invar the_mother mother_visited
+        simp [mother_not_on_stack] at prior_invar
+        unfold cost_is at prior_invar
+        obtain ⟨opti_p, opti_cost, is_cheapest ⟩ := prior_invar
+        unfold Path.is_cheapest at is_cheapest
+        specialize is_cheapest path_mother
+        rw [opti_cost] at is_cheapest
+        unfold Path.cost at is_cheapest
+        omega
+
+    apply dijkstra_path_mother_adj_new_head_is_cheapest (start:=start) (v:=v) (p':=p') (path_mother:=path_mother) <;> try assumption
+    · rfl
+    · unfold path_mother ; rfl
+    · intro p_start_v ⟨p_lt_ph_e,v_visited,cond3⟩
+      obtain ⟨ w,path_start_w,w_adj_v,v_not_earlier_in_path,p_start_v_compose⟩ := p_start_v.split_at_end (Ne.symm v_not_start)
+
+      have w_ne_v : w ≠ v := by
+        by_contra w_eq_v
+        rw [← w_eq_v] at v_not_earlier_in_path
+        have w_in_supp : w ∈ path_start_w.val.support := Path.goal_in_support path_start_w
+        contradiction
+
+
+      have p_start_v_cost : p_start_v.val.cost = edgeCost w_adj_v + path_start_w.val.cost := by
+        rw [p_start_v_compose] ; simp
+
+      have w_in_supp : w ∈ p_start_v.val.support := by rw [p_start_v_compose] ; simp
+      have w_visited : w ∈ state.visited := by specialize cond3 w w_in_supp w_ne_v ; exact cond3.right
+      have w_ne_mem_stack : w ∉ state.stack := by specialize cond3 w w_in_supp w_ne_v ; exact cond3.left
+
+      have w_order_eq : (state.pathOrder w).1 ≤ path_start_w.val.cost := by
+        unfold dijkstra_stack_shortest_path at prior_invar
+        specialize prior_invar w w_visited
+        simp_all
+        unfold cost_is at prior_invar
+        obtain ⟨sp, ⟨ cost_eq_order, cheapest⟩ ⟩ := prior_invar
+        unfold Path.is_cheapest at cheapest
+        specialize cheapest path_start_w
+        rw [cost_eq_order] at cheapest
+        apply cheapest
+
+      have v_updated_from_w : (state.pathOrder v).1 ≤ (state.pathOrder w).1 + edgeCost w_adj_v := by
+        unfold hsearch_invar_on_stack_or_all_neighbours_max_order at update_invar
+        specialize update_invar ⟨ w, w_visited ⟩  w_ne_mem_stack v w_adj_v (by simp)
+        exact update_invar
+
+      conv at p_lt_ph_e => left ; unfold Path.cost
+
+
+      have t_1 : (state.pathOrder v).1 ≤ path_start_w.val.cost + edgeCost w_adj_v := by omega
+      have t_2 : (state.pathOrder v).1 ≤ p_start_v.val.cost := by omega
+      have t_3 : (state.pathOrder v).1 < (path_mother.concat adj_mother_v v_not_in_mother_path).cost := by omega
+      unfold Path.concat at t_3
+      simp at t_3
+      unfold Path.cost at ph_eq_dh
+      rw [pm_eq_dm] at t_3
+      omega
+
+/-- `dijkstra_expand_keeps_shortest_path_invar`, case where the freshly-popped node `v`
+was *not* visited before the expansion of `head` (so it was newly discovered via `head`). -/
+lemma dijkstra_expand_shortest_path_v_new
+    (start head : V) (tail : List V)
+    (mother_invar : WeightedDiGraph.search_invar_mother_is_visited state)
+    (mother_invar_adj : WeightedDiGraph.search_invar_mother_is_adjacent start state)
+    (decreasing_invar : WeightedDiGraph.search_invar_mother_decreasing_path_order start state)
+    (start_visited : WeightedDiGraph.search_invar_start_visited start state)
+    (on_stack_or_nei_visited :
+      WeightedDiGraph.search_invar_on_stack_or_all_neighbours_visited (hsearch_expandable h_zero) state)
+    (stack_visited_invar : WeightedDiGraph.search_invar_stack_is_visited state)
+    (path_order_diff : hsearch_path_order_diff_by_edge_cost start state)
+    (update_invar : hsearch_invar_on_stack_or_all_neighbours_max_order h_zero state)
+    (start_not_mem_tail : search_invar_start_not_mem_tail start state)
+    (stack_nodup : search_invar_stack_nodup state)
+    (prior_invar : dijkstra_stack_shortest_path start state)
+    (compose : state.stack = head :: tail)
+    (head_was_visited_before : head ∈ state.visited)
+    (v : V) (v_not_start : v ≠ start)
+    (v_visited_after : v ∈ (hsearch_step_expand h_zero state head tail).visited)
+    (stack_not_empty_after : (hsearch_step_expand h_zero state head tail).stack ≠ [])
+    (head_after_is_v :
+      (hsearch_step_expand h_zero state head tail).stack.head stack_not_empty_after = v)
+    (v_not_visited : v ∉ state.visited) :
+    g.cost_is start v ((hsearch_step_expand h_zero state head tail).pathOrder v).1 := by
+  let path_to_head : g.Path start head :=
+    (extract_path_to start head state head_was_visited_before mother_invar mother_invar_adj decreasing_invar).1
+  have ph_eq_dh : path_to_head.cost = (state.pathOrder head).1 := by
+    unfold dijkstra_stack_shortest_path at prior_invar
+    apply eq_of_le_of_ge
+    · apply hsearch_path_extracted_not_longer_than_path_order
+      exact path_order_diff
+    · specialize prior_invar head head_was_visited_before
+      simp_all
+      unfold cost_is at prior_invar
+      obtain ⟨hp, ⟨ hp_cost, hp_cheapest ⟩ ⟩ := prior_invar
+      unfold Path.is_cheapest at hp_cheapest
+      specialize hp_cheapest path_to_head
+      rw [hp_cost] at hp_cheapest
+      simp_all
+  have support_visited : ∀ u ∈ path_to_head.val.support, u ∈ state.visited := by
+    apply support_of_path_visited
+    unfold path_to_head
+    rfl
+  unfold cost_is
+  unfold hsearch_step_expand at v_visited_after
+  simp at v_visited_after
+  simp [v_not_visited] at v_visited_after
+  let e := edgeCost v_visited_after
+  have v_order_eq_head_plus_edge : ((hsearch_step_expand h_zero state head tail).pathOrder v).1 = ((hsearch_step_expand h_zero state head tail).pathOrder head).1 + e := by
+    unfold hsearch_step_expand
+    simp_all
+    grind
+  let path_to_v : g.Path start v := path_to_head.concat v_visited_after (by
+    by_contra v_in_support
+    have v_visited_before := support_visited v v_in_support
+    contradiction)
+  use path_to_v
+  constructor
+  · unfold path_to_v
+    rw [WeightedDiGraph.Path.concat_inc_cost_by_edge]
+    unfold hsearch_step_expand
+    simp_all
+    unfold edgeCost
+    rw [add_comm]
+  · apply dijkstra_path_head_adj_new_head_is_cheapest <;> try assumption
+    · grind
 lemma dijkstra_expand_keeps_shortest_path_invar
     (start : V) (goal : V)
     ----- co-invariants needed for path extraction
@@ -1134,43 +1602,22 @@ lemma dijkstra_expand_keeps_shortest_path_invar
     intro head tail ⟨prior_invar,head_is_not_goal,compose⟩
     unfold dijkstra_stack_shortest_path --at prior_invar ⊢
     intro v v_visited_after not_on_stack_or_head
+    have prior_invar_c : dijkstra_stack_shortest_path start state := prior_invar
+    have compose_c : state.stack = head :: tail := compose
+    have v_visited_after_c : v ∈ (hsearch_step_expand h_zero state head tail).visited :=
+      v_visited_after
 
     simp at compose v_visited_after not_on_stack_or_head prior_invar ⊢
 
 
-
     -- properties of the current head
     have head_was_visited_before : head ∈ state.visited := by simp_all
-    -- there is a path to head and it is as long as we memorised:w
-
-    let path_to_head : g.Path start head :=
-      (extract_path_to start head state head_was_visited_before mother_invar mother_invar_adj decreasing_invar).1
-
-    -- cost of path_to_head is what we memorised
-    have ph_eq_dh : path_to_head.cost = (state.pathOrder head).1 := by
-      unfold dijkstra_stack_shortest_path at prior_invar
-      apply eq_of_le_of_ge
-      · apply hsearch_path_extracted_not_longer_than_path_order
-        exact path_order_diff
-      · specialize prior_invar head head_was_visited_before
-        simp_all
-        unfold cost_is at prior_invar
-        obtain ⟨hp, ⟨ hp_cost, hp_cheapest ⟩ ⟩ := prior_invar
-        unfold Path.is_cheapest at hp_cheapest
-        specialize hp_cheapest path_to_head
-        rw [hp_cost] at hp_cheapest
-        simp_all
-
-    have support_visited : ∀ u ∈ path_to_head.val.support, u ∈ state.visited := by
-      apply support_of_path_visited
-      unfold path_to_head
-      rfl
-
 
 
     by_cases v_not_start : v ≠ start
     · cases not_on_stack_or_head
       · next v_not_on_stack =>
+        clear prior_invar_c compose_c v_visited_after_c
         specialize prior_invar v
         unfold hsearch_step_expand at v_not_on_stack v_visited_after ⊢
         simp at v_visited_after
@@ -1186,447 +1633,23 @@ lemma dijkstra_expand_keeps_shortest_path_invar
       · next v_now_stack_head =>
         simp at v_now_stack_head
         obtain ⟨ stack_not_empty_after, head_after_is_v ⟩ := v_now_stack_head
-        unfold cost_is
 
 
         by_cases v_visited : v ∈ state.visited
-        ·
-          -- v is *now* the head of the stack, but it was already visited before.
-          -- this means it had to already have been on the stack before
-          have mother_options := hsearch_mother_options h_zero state head tail ⟨v,v_visited⟩ v_visited_after
+        · have mother_options :=
+            hsearch_mother_options h_zero state head tail ⟨v, v_visited⟩ v_visited_after_c
           cases mother_options
           case pos.inl mother_is_head =>
-            have adj_head_v : g.Adj head v := by
-              unfold hsearch_step_expand at mother_is_head
-              unfold search_invar_mother_is_adjacent at mother_invar_adj
-              specialize mother_invar_adj ⟨ v, v_visited ⟩ v_not_start
-              grind
-
-            have v_ne_head : v ≠ head := by
-              by_contra v_eq_head
-              subst v_eq_head
-              unfold hsearch_step_expand at mother_is_head
-              unfold search_invar_mother_decreasing_path_order at decreasing_invar
-              specialize decreasing_invar ⟨ v, v_visited ⟩ v_not_start
-              simp_all
-              apply FValueComp.lt_irr (state.pathOrder v) decreasing_invar
-
-            let e := edgeCost adj_head_v
-            have v_order_eq_head_plus_edge : ((hsearch_step_expand h_zero state head tail).pathOrder v).1 = ((hsearch_step_expand h_zero state head tail).pathOrder head).1 + e := by
-              unfold hsearch_step_expand at mother_is_head ⊢
-              simp_all
-              grind
-
-            have v_not_mem_ph_support : v ∉ ↑path_to_head.val.support := by
-              by_contra v_in_support
-              have h := (extract_path_to start head state head_was_visited_before mother_invar mother_invar_adj decreasing_invar).2
-              specialize h v (by apply v_in_support) v_ne_head
-              unfold hsearch_step_expand at v_order_eq_head_plus_edge mother_is_head
-              simp_all
-              have v_visited : v ∈ state.visited := by grind
-              unfold search_invar_mother_decreasing_path_order at decreasing_invar
-              specialize decreasing_invar ⟨ v, v_visited ⟩ v_not_start
-              split_ifs at v_order_eq_head_plus_edge <;> (try  grind)
-              · simp_all
-                have order_eq := FValueComp.lt_antisymm (state.pathOrder head) (state.pathOrder v) decreasing_invar h
-                rw [order_eq] at h
-                apply FValueComp.lt_irr (state.pathOrder v) h
-              · simp_all
-                have order_eq := FValueComp.lt_antisymm (state.pathOrder head) (state.pathOrder v) decreasing_invar h
-                rw [order_eq] at h
-                apply FValueComp.lt_irr (state.pathOrder v) h
-              · simp_all
-                have order_eq := FValueComp.lt_antisymm (state.pathOrder head) (state.pathOrder v) decreasing_invar h
-                rw [order_eq] at h
-                apply FValueComp.lt_irr (state.pathOrder v) h
-              all_goals
-                rename_i a b c
-                unfold edgeCost at c v_order_eq_head_plus_edge
-                unfold FValueComp.lt Nat.instFValueCompProd at h
-                simp_all
-                apply Prod.lex_iff.mp at h
-                cases h
-                · grind
-                next prop =>
-                  obtain ⟨ eq, lt ⟩ := prop
-                  have e_zero : e = 0 := by omega
-                  simp_all
-                  have o_eq : state.pathOrder v = ((state.pathOrder head).1, (state.pathOrder head).2 + 1) := by grind
-                  specialize mother_is_head o_eq
-                  grind
-
-            let path_to_v : g.Path start v := path_to_head.concat adj_head_v v_not_mem_ph_support
-
-            use path_to_v
-            constructor
-            · unfold path_to_v
-              rw [WeightedDiGraph.Path.concat_inc_cost_by_edge]
-              unfold hsearch_step_expand
-              simp_all
-              unfold edgeCost
-              rw [add_comm]
-              split_ifs <;> try grind
-              rename_i v_lt_head_edge
-              unfold hsearch_step_expand at v_order_eq_head_plus_edge
-              simp_all
-              unfold e edgeCost at v_order_eq_head_plus_edge
-              split_ifs at v_order_eq_head_plus_edge <;> grind
-            · apply dijkstra_path_head_adj_new_head_is_cheapest <;> try assumption
-              · intro p_start_v ⟨p_lt_ph_e,v_visited,cond3⟩
-                obtain ⟨ w,path_start_w,w_adj_v,v_not_earlier_in_path,p_start_v_compose⟩ := p_start_v.split_at_end (Ne.symm v_not_start)
-
-                have w_ne_v : w ≠ v := by
-                  by_contra w_eq_v
-                  rw [← w_eq_v] at v_not_earlier_in_path
-                  have w_in_supp : w ∈ path_start_w.val.support := Path.goal_in_support path_start_w
-                  contradiction
-
-
-                have p_start_v_cost : p_start_v.val.cost = edgeCost w_adj_v + path_start_w.val.cost := by
-                  rw [p_start_v_compose] ; simp
-
-                have w_in_supp : w ∈ p_start_v.val.support := by rw [p_start_v_compose] ; simp
-                have w_visited : w ∈ state.visited := by specialize cond3 w w_in_supp w_ne_v ; exact cond3.right
-                have w_ne_mem_stack : w ∉ state.stack := by specialize cond3 w w_in_supp w_ne_v ; exact cond3.left
-
-                have w_order_eq : (state.pathOrder w).1 ≤ path_start_w.val.cost := by
-                  unfold dijkstra_stack_shortest_path at prior_invar
-                  specialize prior_invar w w_visited
-                  simp_all
-                  unfold cost_is at prior_invar
-                  obtain ⟨sp, ⟨ cost_eq_order, cheapest⟩ ⟩ := prior_invar
-                  unfold Path.is_cheapest at cheapest
-                  specialize cheapest path_start_w
-                  rw [cost_eq_order] at cheapest
-                  apply cheapest
-
-                have v_updated_from_w : (state.pathOrder v).1 ≤ (state.pathOrder w).1 + edgeCost w_adj_v := by
-                  unfold hsearch_invar_on_stack_or_all_neighbours_max_order at update_invar
-                  specialize update_invar ⟨ w, w_visited ⟩  w_ne_mem_stack v w_adj_v (by simp)
-                  exact update_invar
-
-                conv at p_lt_ph_e => left ; unfold Path.cost
-
-
-                have t_1 : (state.pathOrder v).1 ≤ path_start_w.val.cost + edgeCost w_adj_v := by omega
-                have t_2 : (state.pathOrder v).1 ≤ p_start_v.val.cost := by omega
-                have t_3 : (state.pathOrder v).1 < (path_to_head.concat adj_head_v v_not_mem_ph_support).cost := by omega
-                unfold Path.concat at t_3
-                simp at t_3
-                unfold Path.cost at ph_eq_dh
-                rw [ph_eq_dh] at t_3
-                unfold hsearch_step_expand at v_order_eq_head_plus_edge
-                simp_all
-                split_ifs at v_order_eq_head_plus_edge <;> omega
+            exact dijkstra_expand_shortest_path_mother_is_head state start head tail mother_invar mother_invar_adj decreasing_invar
+              start_visited on_stack_or_nei_visited stack_visited_invar path_order_diff update_invar start_not_mem_tail stack_nodup
+              prior_invar_c compose_c head_was_visited_before v v_not_start v_visited_after_c stack_not_empty_after head_after_is_v v_visited mother_is_head
           · obtain ⟨mother_same, mother_ne_head⟩ := ‹_›
-            let the_mother := state.mother ⟨v, v_visited⟩
-            have mother_visited : the_mother ∈ state.visited := by
-              unfold search_invar_mother_is_visited at mother_invar
-              specialize mother_invar ⟨ v, v_visited ⟩
-              grind
-            have pathOrder_unchanged : (hsearch_step_expand h_zero state head tail).pathOrder v = state.pathOrder v := by
-              unfold hsearch_step_expand at mother_same ⊢
-              grind
-            have adj_mother_v : g.Adj the_mother v := by
-              unfold search_invar_mother_is_adjacent at mother_invar_adj
-              specialize mother_invar_adj ⟨ v, v_visited ⟩
-              grind
-
-            have mother_and_edge_smaller_order_before : (state.pathOrder the_mother).1 + edgeCost adj_mother_v ≤ (state.pathOrder v).1 := by
-              unfold hsearch_path_order_diff_by_edge_cost at path_order_diff
-              specialize path_order_diff mother_invar_adj v v_visited v_not_start
-              unfold the_mother
-              grind
-
-            have pathOrder_mother_decreases : ((hsearch_step_expand h_zero state head tail).pathOrder the_mother).1 ≤ (state.pathOrder the_mother).1 := by
-              unfold hsearch_step_expand
-              simp_all
-              grind
-
-
-            have mother_not_on_stack : the_mother ∉ state.stack := by
-              unfold hsearch_step_expand at mother_same
-              simp_all
-              constructor
-              · grind
-              · by_contra mother_in_tail
-                have mother_neq_v : the_mother ≠ v := by
-                  intro h
-                  specialize decreasing_invar ⟨v, v_visited⟩ (by simp_all)
-                  simp at decreasing_invar
-                  nth_rewrite 2 [← h] at decreasing_invar
-                  exact FValueComp.lt_irr _ decreasing_invar
-                have mother_now_geq :((hsearch_step_expand h_zero state head tail).pathOrder the_mother).1 ≥ ((hsearch_step_expand h_zero state head tail).pathOrder v).1 := by
-                  unfold hsearch_step_expand at head_after_is_v
-                  simp_all
-                  apply mergeSort_head_from_head_unsorted at head_after_is_v
-                  · specialize head_after_is_v the_mother (by simp; left ; exact mother_in_tail)
-                    cases head_after_is_v
-                    case inl mother_v => contradiction
-                    case inr h =>
-                      unfold hsearch_step_expand
-                      simp_all
-                      split_ifs
-                      all_goals
-                        simp_all
-                        split_ifs at h
-                        all_goals
-                          cases h
-                          · grind
-                          · rename_i r
-                            unfold Nat.instFValueCompProd at r
-                            simp at r
-                            grind
-                  · intros; apply hsearch_merge_trans <;> assumption
-                  · intros; apply hsearch_merge_total
-
-                have mother_now_geq_v_bef :((hsearch_step_expand h_zero state head tail).pathOrder the_mother).1 ≥ (state.pathOrder v).1 := by grind
-
-                by_cases zero_cost_edge : edgeCost adj_mother_v = 0
-                ·
-                  have mother_le_order_before : (state.pathOrder the_mother).1 ≤ (state.pathOrder v).1 := by omega
-                  have mother_ge_order_before : (state.pathOrder the_mother).1 ≥ (state.pathOrder v).1 := by omega
-                  have mother_eq_order_before : (state.pathOrder the_mother).1 = (state.pathOrder v).1 := by omega
-
-                  clear mother_le_order_before mother_ge_order_before
-                  unfold hsearch_step_expand at head_after_is_v
-                  simp_all
-                  apply mergeSort_head_from_head_unsorted at head_after_is_v
-                  · specialize head_after_is_v the_mother (by simp; left ; exact mother_in_tail)
-                    cases head_after_is_v
-                    case pos.inl mother_v => contradiction
-                    case pos.inr h =>
-
-                      unfold search_invar_mother_decreasing_path_order at decreasing_invar
-                      specialize decreasing_invar ⟨ v , v_visited ⟩ v_not_start
-                      unfold FValueComp.lt Nat.instFValueCompProd at decreasing_invar
-                      simp at decreasing_invar
-                      apply Prod.lex_iff.mp at decreasing_invar
-                      have p' : (state.pathOrder (state.mother ⟨v, v_visited⟩)).2 < (state.pathOrder v).2 := by grind
-
-                      simp_all
-                      split_ifs at h
-                      rotate_left 9
-                      · simp_all
-                        cases h
-                        · try simp_all
-                          grind
-                        · rename_i r
-                          unfold Nat.instFValueCompProd at r
-                          simp at r
-                          apply Prod.lex_iff.mp at r
-                          have p : (state.pathOrder v).2 < (state.pathOrder the_mother).2 := by
-                            cases r
-                            case inl h =>
-                              simp_all
-                              rename_i a b c
-                              unfold edgeCost at a b c h mother_eq_order_before decreasing_invar
-                              have adj_head_v : g.Adj head v := by grind
-                              have adj_head_mother : g.Adj head the_mother := by grind
-
-                              by_cases edgeCost adj_head_v = edgeCost adj_head_mother
-                              · rename_i cost_eq
-                                specialize b (by unfold edgeCost at cost_eq ; grind)
-                                unfold hsearch_step_expand at pathOrder_unchanged
-                                simp at pathOrder_unchanged
-                                unfold edgeCost at pathOrder_unchanged
-                                specialize pathOrder_unchanged adj_head_v
-                                simp [*] at pathOrder_unchanged
-                                have h : (state.pathOrder head).2 + 1 = (state.pathOrder v).2 := by grind
-                                grind
-                              · have v_lt_m : edgeCost adj_head_v < edgeCost adj_head_mother := by
-                                  rename_i neq
-                                  unfold edgeCost at neq ⊢
-                                  grind
-                                unfold hsearch_step_expand at pathOrder_unchanged
-                                simp at pathOrder_unchanged
-                                unfold edgeCost at pathOrder_unchanged
-                                specialize pathOrder_unchanged adj_head_v
-                                simp [*] at pathOrder_unchanged
-                                specialize pathOrder_unchanged (by grind)
-                                have h : (state.pathOrder head).2 + 1 = (state.pathOrder v).2 := by grind
-                                grind
-                            · grind
-                          clear r
-                          unfold the_mother at p
-                          omega
-                      all_goals
-                        simp_all
-                        cases h
-                        · simp_all
-                          try grind
-                        · rename_i r
-                          unfold Nat.instFValueCompProd at r
-                          simp at r
-                          apply Prod.lex_iff.mp at r
-                          have p : (state.pathOrder v).2 < (state.pathOrder the_mother).2 := by grind
-                          clear r
-                          unfold the_mother at p
-                          omega
-                  · intros; apply hsearch_merge_trans <;> assumption
-                  · intros; apply hsearch_merge_total
-
-                · have mother_smaller_order_before : (state.pathOrder the_mother).1 < (state.pathOrder v).1 := by omega
-                  have mother_now_smaller_order_before : ((hsearch_step_expand h_zero state head tail).pathOrder the_mother).1 < ((hsearch_step_expand h_zero state head tail).pathOrder v).1 := by grind
-                  have mother_now_geq :((hsearch_step_expand h_zero state head tail).pathOrder the_mother).1 ≥ ((hsearch_step_expand h_zero state head tail).pathOrder v).1 := by
-                    unfold hsearch_step_expand at head_after_is_v
-                    simp_all
-                  omega
-
-            -- path to v is the path it was before. This will be a path to its mother and then that edge
-            let path_mother := (extract_path_to start the_mother state mother_visited mother_invar mother_invar_adj decreasing_invar).1
-
-
-            have v_not_in_mother_path : v ∉ path_mother.val.support := by
-              intro v_in_path_mother
-              have path_order := (extract_path_to start the_mother state mother_visited
-                mother_invar mother_invar_adj decreasing_invar).2
-              -- v ≠ the_mother (since pathOrderstart_not_mem_tail the_mother ≺ pathOrder v, so they differ)
-              have v_ne_mother : v ≠ the_mother := by
-                intro h--; subst h
-                have decr := decreasing_invar ⟨v, v_visited⟩ v_not_start
-                simp at decr
-                nth_rewrite 2 [h] at decr
-                exact FValueComp.lt_irr _ decr
-              -- extract_path_to .2: pathOrder v ≺ pathOrder the_mother
-              have pv_lt_pm := path_order v v_in_path_mother v_ne_mother
-              -- decreasing_invar: pathOrder the_mother ≺ pathOrder v
-              have pm_lt_pv := decreasing_invar ⟨v, v_visited⟩ v_not_start
-              -- cycle: pathOrder v ≺ pathOrder the_mother ≺ pathOrder v
-              exact FValueComp.lt_irr _ (FValueComp.lt_trans _ _ _ pv_lt_pm pm_lt_pv)
-            let path_mother_v := path_mother.concat adj_mother_v v_not_in_mother_path
-
-            use path_mother_v
-            constructor
-            · rw [pathOrder_unchanged]
-              unfold path_mother_v
-              rw [Path.concat_inc_cost_by_edge]
-              apply eq_of_le_of_ge
-              · have original_path_order_diff := path_order_diff
-                unfold hsearch_path_order_diff_by_edge_cost at path_order_diff
-                specialize path_order_diff mother_invar_adj v v_visited v_not_start
-                apply le_trans ; rotate_left
-                · apply path_order_diff
-                · nth_rewrite 1 [add_comm]
-                  apply add_le_add_left
-                  unfold path_mother
-                  apply hsearch_path_extracted_not_longer_than_path_order
-                  exact original_path_order_diff
-              · unfold hsearch_invar_on_stack_or_all_neighbours_max_order at update_invar
-                specialize update_invar ⟨ the_mother, mother_visited ⟩ mother_not_on_stack v adj_mother_v (by simp)
-                rw [add_comm]
-                apply le_trans
-                · apply update_invar
-                · apply add_le_add_left
-                  unfold dijkstra_stack_shortest_path at prior_invar
-                  specialize prior_invar the_mother
-                  simp_all
-                  unfold cost_is at prior_invar
-                  obtain ⟨ p, p_cost, is_cheapest ⟩ := prior_invar
-                  unfold Path.is_cheapest at is_cheapest
-                  specialize is_cheapest path_mother
-                  unfold Path.cost at is_cheapest p_cost
-                  convert is_cheapest
-                  exact p_cost.symm
-            · rename_i h
-              obtain ⟨ mother_remains, mother_ne_head ⟩ := h
-              unfold Path.is_cheapest
-              intro p'
-              by_contra p'_cheaper; simp at p'_cheaper
-              have pm_eq_dm : path_mother.val.cost = (state.pathOrder the_mother).1 := by
-                apply eq_of_le_of_ge
-                · apply hsearch_path_extracted_not_longer_than_path_order
-                  assumption
-                · specialize prior_invar the_mother mother_visited
-                  simp [mother_not_on_stack] at prior_invar
-                  unfold cost_is at prior_invar
-                  obtain ⟨opti_p, opti_cost, is_cheapest ⟩ := prior_invar
-                  unfold Path.is_cheapest at is_cheapest
-                  specialize is_cheapest path_mother
-                  rw [opti_cost] at is_cheapest
-                  unfold Path.cost at is_cheapest
-                  omega
-
-              apply dijkstra_path_mother_adj_new_head_is_cheapest (start:=start) (v:=v) (p':=p') (path_mother:=path_mother) <;> try assumption
-              · rfl
-              · unfold path_mother ; rfl
-              · intro p_start_v ⟨p_lt_ph_e,v_visited,cond3⟩
-                obtain ⟨ w,path_start_w,w_adj_v,v_not_earlier_in_path,p_start_v_compose⟩ := p_start_v.split_at_end (Ne.symm v_not_start)
-
-                have w_ne_v : w ≠ v := by
-                  by_contra w_eq_v
-                  rw [← w_eq_v] at v_not_earlier_in_path
-                  have w_in_supp : w ∈ path_start_w.val.support := Path.goal_in_support path_start_w
-                  contradiction
-
-
-                have p_start_v_cost : p_start_v.val.cost = edgeCost w_adj_v + path_start_w.val.cost := by
-                  rw [p_start_v_compose] ; simp
-
-                have w_in_supp : w ∈ p_start_v.val.support := by rw [p_start_v_compose] ; simp
-                have w_visited : w ∈ state.visited := by specialize cond3 w w_in_supp w_ne_v ; exact cond3.right
-                have w_ne_mem_stack : w ∉ state.stack := by specialize cond3 w w_in_supp w_ne_v ; exact cond3.left
-
-                have w_order_eq : (state.pathOrder w).1 ≤ path_start_w.val.cost := by
-                  unfold dijkstra_stack_shortest_path at prior_invar
-                  specialize prior_invar w w_visited
-                  simp_all
-                  unfold cost_is at prior_invar
-                  obtain ⟨sp, ⟨ cost_eq_order, cheapest⟩ ⟩ := prior_invar
-                  unfold Path.is_cheapest at cheapest
-                  specialize cheapest path_start_w
-                  rw [cost_eq_order] at cheapest
-                  apply cheapest
-
-                have v_updated_from_w : (state.pathOrder v).1 ≤ (state.pathOrder w).1 + edgeCost w_adj_v := by
-                  unfold hsearch_invar_on_stack_or_all_neighbours_max_order at update_invar
-                  specialize update_invar ⟨ w, w_visited ⟩  w_ne_mem_stack v w_adj_v (by simp)
-                  exact update_invar
-
-                conv at p_lt_ph_e => left ; unfold Path.cost
-
-
-                have t_1 : (state.pathOrder v).1 ≤ path_start_w.val.cost + edgeCost w_adj_v := by omega
-                have t_2 : (state.pathOrder v).1 ≤ p_start_v.val.cost := by omega
-                have t_3 : (state.pathOrder v).1 < (path_mother.concat adj_mother_v v_not_in_mother_path).cost := by omega
-                unfold Path.concat at t_3
-                simp at t_3
-                unfold Path.cost at ph_eq_dh
-                rw [pm_eq_dm] at t_3
-                omega
-        · unfold hsearch_step_expand at v_visited_after
-          simp at v_visited_after
-          simp [v_visited] at v_visited_after
-
-          let e := edgeCost v_visited_after
-          have v_order_eq_head_plus_edge : ((hsearch_step_expand h_zero state head tail).pathOrder v).1 = ((hsearch_step_expand h_zero state head tail).pathOrder head).1 + e := by
-            unfold hsearch_step_expand
-            simp_all
-            grind
-
-          let path_to_v : g.Path start v := path_to_head.concat v_visited_after (by
-            by_contra v_in_support
-            have v_visited_before := support_visited v v_in_support
-            contradiction)
-
-
-          use path_to_v
-          constructor
-          · unfold path_to_v
-            rw [WeightedDiGraph.Path.concat_inc_cost_by_edge]
-            unfold hsearch_step_expand
-            simp_all
-            unfold edgeCost
-            rw [add_comm]
-          · -- Situation: v is head of stack after expansion of head
-            -- v was added to the stack due to expansion of v (i.e. it was not visited before)
-            -- ph (path_to_head) is a shortest path to head
-            -- selected apth to v is (path_to_head ; <head,v>)
-            --
-            -- Now: Assume there is a shorter path to v: p'
-            apply dijkstra_path_head_adj_new_head_is_cheapest <;> try assumption
-            · grind
-            --· grind
+            exact dijkstra_expand_shortest_path_mother_same state start head tail mother_invar mother_invar_adj decreasing_invar
+              start_visited on_stack_or_nei_visited stack_visited_invar path_order_diff update_invar start_not_mem_tail stack_nodup
+              prior_invar_c compose_c head_was_visited_before v v_not_start v_visited_after_c stack_not_empty_after head_after_is_v v_visited mother_same mother_ne_head
+        · exact dijkstra_expand_shortest_path_v_new state start head tail mother_invar mother_invar_adj decreasing_invar
+            start_visited on_stack_or_nei_visited stack_visited_invar path_order_diff update_invar start_not_mem_tail stack_nodup
+            prior_invar_c compose_c head_was_visited_before v v_not_start v_visited_after_c stack_not_empty_after head_after_is_v v_visited
     · simp at v_not_start
       subst v_not_start
       apply dijkstra_expand_keeps_shortest_path_invar_start
