@@ -181,7 +181,7 @@ lemma pathOrder_mono_after_expand :
     ∀ head : V, ∀ tail : List V,
       ∀ v : V, v ∈ state.visited →
         ((hsearch_step_expand heur state head tail).pathOrder v).1 ≤ (state.pathOrder v).1 := by
-  unfold hsearch_step_expand;
+  unfold hsearch_step_expand
   unfold new_cost
   grind
 
@@ -217,7 +217,7 @@ lemma pathOrder_newly_visited
     (v : V) (adj : g.Adj head v)
     (hv_old : v ∉ state.visited) :
     ((hsearch_step_expand heur state head tail).pathOrder v).1 = (state.pathOrder head).1 + g.edgeCost adj := by
-  unfold hsearch_step_expand;
+  unfold hsearch_step_expand
   unfold path_val; grind
 
 end
@@ -309,10 +309,6 @@ lemma hsearch_expand_metric_reduction : WeightedDiGraph.termination_proof_for_ex
             clear not_lex not_eq r
             simp_all
           · grind
-
-
-
-
 lemma hsearch_expand_newly_added_are_adjacent
     (priorState : hsearch_search_state g)
     (stackHead : V)
@@ -324,7 +320,6 @@ lemma hsearch_expand_newly_added_are_adjacent
     unfold hsearch_step_expand at x_on_stack_after
     simp_all
 
-
 lemma hsearch_expand_keeps_stack_in_visited
     (priorState : hsearch_search_state  g)
     (stackHead : V)
@@ -332,10 +327,9 @@ lemma hsearch_expand_keeps_stack_in_visited
     WeightedDiGraph.search_invar_stack_is_visited priorState ∧
       stackHead ∈ priorState.visited ∧ (∀ x : V, x ∉ priorState.visited → x ∉ stackTail) →
       WeightedDiGraph.search_invar_stack_is_visited (hsearch_step_expand heur priorState stackHead stackTail) := by
-  unfold hsearch_step_expand;
-  simp +zetaDelta at *;
+  unfold hsearch_step_expand
+  simp +zetaDelta at *
   grind
-
 
 lemma hsearch_expand_keeps_mother_in_visited
     (priorState : hsearch_search_state  g)
@@ -343,9 +337,8 @@ lemma hsearch_expand_keeps_mother_in_visited
     (stackTail : List V):
     WeightedDiGraph.search_invar_mother_is_visited priorState ∧ stackHead ∈ priorState.visited → WeightedDiGraph.search_invar_mother_is_visited (hsearch_step_expand heur priorState stackHead stackTail) := by
   -- By definition of `hsearch_step_expand`, the mother of any vertex in the new state is either the stack head or the mother from the prior state.
-  unfold search_invar_mother_is_visited hsearch_step_expand;
+  unfold search_invar_mother_is_visited hsearch_step_expand
   grind
-
 
 lemma hsearch_expand_keeps_mother_is_adjacent
     (start : V)
@@ -381,8 +374,89 @@ lemma hsearch_mother_options
         unfold hsearch_step_expand
         grind
 
-set_option maxHeartbeats 1000000 in
-/-- TODO: externalise haves into helper theorems -/
+lemma hsearch_expand_was_visited_if_not_adj
+    (priorState : hsearch_search_state g) (stackHead : V) (stackTail : List V) :
+    ∀ x ∈ (hsearch_step_expand heur priorState stackHead stackTail).visited,
+      ¬ g.Adj stackHead x → x ∈ priorState.visited := by
+  intro x now_visited not_adj
+  unfold hsearch_step_expand at now_visited
+  grind
+
+lemma hsearch_expand_pathOrder_eq_of_not_adj
+    (priorState : hsearch_search_state g) (stackHead : V) (stackTail : List V) :
+    ∀ x : V, ¬ g.Adj stackHead x →
+      priorState.pathOrder x
+        = (hsearch_step_expand heur priorState stackHead stackTail).pathOrder x := by
+  intro x ne_adj_head
+  unfold hsearch_step_expand
+  grind
+
+lemma hsearch_expand_mother_eq_of_not_adj
+    (priorState : hsearch_search_state g) (stackHead : V) (stackTail : List V) :
+    ∀ x : (hsearch_step_expand heur priorState stackHead stackTail).visited,
+      ∀ ne_adj : ¬ g.Adj stackHead x,
+        priorState.mother ⟨↑x, hsearch_expand_was_visited_if_not_adj heur priorState
+            stackHead stackTail x.val x.prop ne_adj⟩
+          = (hsearch_step_expand heur priorState stackHead stackTail).mother x := by
+  intro x ne_adj_head
+  unfold hsearch_step_expand
+  grind
+
+lemma hsearch_expand_pathOrder_fst_le
+    (priorState : hsearch_search_state g) (stackHead : V) (stackTail : List V) :
+    ∀ x ∈ priorState.visited,
+      ((hsearch_step_expand heur priorState stackHead stackTail).pathOrder x).1
+        ≤ (priorState.pathOrder x).1 := by
+  intro x
+  unfold hsearch_step_expand
+  simp_all
+  split_ifs <;> simp_all
+
+lemma hsearch_expand_pathOrder_snd_le
+    (priorState : hsearch_search_state g) (stackHead : V) (stackTail : List V) :
+    ∀ x ∈ priorState.visited,
+      ((hsearch_step_expand heur priorState stackHead stackTail).pathOrder x).1
+          = (priorState.pathOrder x).1 →
+        ((hsearch_step_expand heur priorState stackHead stackTail).pathOrder x).2
+          ≤ (priorState.pathOrder x).2 := by
+  intro x
+  unfold hsearch_step_expand
+  simp_all
+  split_ifs <;> simp_all
+
+lemma hsearch_expand_x_still_visited
+    (priorState : hsearch_search_state g) (stackHead : V) (stackTail : List V) :
+    ∀ x : priorState.visited,
+      ↑x ∈ (hsearch_step_expand heur priorState stackHead stackTail).visited := by
+  intro x
+  unfold hsearch_step_expand
+  grind
+
+lemma hsearch_expand_mother_same_pathOrder
+    (priorState : hsearch_search_state g) (stackHead : V) (stackTail : List V) :
+    ∀ x : priorState.visited, ∀ _ : g.Adj stackHead x,
+      ((hsearch_step_expand heur priorState stackHead stackTail).mother
+            ⟨x.val, hsearch_expand_x_still_visited heur priorState stackHead stackTail x⟩)
+            = (priorState.mother x) ∧ (priorState.mother x) ≠ stackHead →
+        (hsearch_step_expand heur priorState stackHead stackTail).pathOrder x
+          = priorState.pathOrder x := by
+  intro x adj_head_x mother_same
+  unfold hsearch_step_expand at mother_same ⊢
+  grind
+
+lemma hsearch_expand_head_order_stays
+    (priorState : hsearch_search_state g) (stackHead : V) (stackTail : List V)
+    (stack_head_visited : stackHead ∈ priorState.visited) :
+    ((hsearch_step_expand heur priorState stackHead stackTail).pathOrder stackHead).1
+      = (priorState.pathOrder stackHead).1 := by
+  unfold hsearch_step_expand
+  simp
+  split_ifs
+  · rfl
+  · rfl
+  · next h_1 h_2 => grind
+  · rfl
+
 lemma hsearch_expand_keeps_mother_ordered
     (start : V)
     (priorState : hsearch_search_state  g)
@@ -409,47 +483,23 @@ lemma hsearch_expand_keeps_mother_ordered
     simp at first_dim
 
 
-    -- local helper theorem
-    have a_ne_visi_head_adj_a : a ∉ priorState.visited → g.Adj stackHead a := by
-      intro a_not_visited
-      unfold hsearch_step_expand at a_now_visited
-      grind
-
-    have was_visited_if_not_adj :
-      ∀ x ∈ (hsearch_step_expand heur priorState stackHead stackTail).visited, ¬ g.Adj stackHead x → x ∈ priorState.visited := by
-      intro x now_visited not_adj
-      unfold hsearch_step_expand at now_visited
-      grind
-
-    have h_order : ∀ x : V, ¬ g.Adj stackHead x → priorState.pathOrder x = (hsearch_step_expand heur priorState stackHead stackTail).pathOrder x := by
-      intro x ne_adj_head
-      unfold hsearch_step_expand
-      grind
-
-    have h_mother : ∀ x : (hsearch_step_expand heur priorState stackHead stackTail).visited, ∀ ne_adj : ¬ g.Adj stackHead x, priorState.mother ⟨↑x, was_visited_if_not_adj x.val x.prop ne_adj ⟩ = (hsearch_step_expand heur priorState stackHead stackTail).mother x := by
-      intro x ne_adj_head
-      unfold hsearch_step_expand
-      grind
-
-    have h_dec_1 :
-      ∀ x ∈ priorState.visited, ((hsearch_step_expand heur priorState stackHead stackTail).pathOrder x).1 ≤ (priorState.pathOrder x).1:= by
-      intro x
-      unfold hsearch_step_expand
-      simp_all
-      split_ifs <;> simp_all
-
-    have h_dec_2 :
-      ∀ x ∈ priorState.visited, ((hsearch_step_expand heur priorState stackHead stackTail).pathOrder x).1 = (priorState.pathOrder x).1 → ((hsearch_step_expand heur priorState stackHead stackTail).pathOrder x).2 ≤ (priorState.pathOrder x).2:= by
-      intro x
-      unfold hsearch_step_expand
-      simp_all
-      split_ifs <;> simp_all
-
-    have h_new_visi :
-      ∀ x : V, ∀ adj : g.Adj stackHead x, x ∉ priorState.visited → ((hsearch_step_expand heur priorState stackHead stackTail).pathOrder x).1 ≤ (path_val priorState stackHead x adj).1:= by
-      intro x
-      unfold hsearch_step_expand
-      simp_all
+    have was_visited_if_not_adj :=
+      hsearch_expand_was_visited_if_not_adj heur priorState stackHead stackTail
+    have h_order :=
+      hsearch_expand_pathOrder_eq_of_not_adj heur priorState stackHead stackTail
+    have h_mother :=
+      hsearch_expand_mother_eq_of_not_adj heur priorState stackHead stackTail
+    have h_dec_1 :=
+      hsearch_expand_pathOrder_fst_le heur priorState stackHead stackTail
+    have h_dec_2 :=
+      hsearch_expand_pathOrder_snd_le heur priorState stackHead stackTail
+    have x_still_visited :=
+      hsearch_expand_x_still_visited heur priorState stackHead stackTail
+    have mother_same_order :=
+      hsearch_expand_mother_same_pathOrder heur priorState stackHead stackTail
+    have head_order_stays :=
+      hsearch_expand_head_order_stays heur priorState stackHead stackTail
+        stack_head_visited_prior
 
     have minvar : ∀ a_visited : a ∈ priorState.visited, (priorState.pathOrder (priorState.mother ⟨a, a_visited⟩)).1 ≤ (priorState.pathOrder a).1 := by
       intro a_visited
@@ -468,29 +518,6 @@ lemma hsearch_expand_keeps_mother_ordered
       unfold Nat.instFValueCompProd at mother_decreasing_prior
       simp at mother_decreasing_prior
       grind
-
-    have x_still_visited : ∀ x : priorState.visited, ↑x ∈ (hsearch_step_expand heur priorState stackHead stackTail).visited := by
-      intro x
-      unfold hsearch_step_expand
-      grind
-
-    have mother_same_order : ∀ x : priorState.visited, ∀ adj_head_x : g.Adj stackHead x,
-      ((hsearch_step_expand heur priorState stackHead stackTail).mother ⟨x.val, x_still_visited x⟩) = (priorState.mother x) ∧ (priorState.mother x) ≠ stackHead →
-      (hsearch_step_expand heur priorState stackHead stackTail).pathOrder x = priorState.pathOrder x := by
-        intro x adj_head_x mother_same
-        unfold hsearch_step_expand at mother_same ⊢
-        grind
-
-
-    have head_order_stays : ((hsearch_step_expand heur priorState stackHead stackTail).pathOrder stackHead).1 = (priorState.pathOrder stackHead).1 := by
-      unfold hsearch_step_expand
-      simp
-      split_ifs
-      · rfl
-      · rfl
-      · next h_1 h_2 =>
-        grind
-      · rfl
 
     by_cases adj_head_a : g.Adj stackHead a
     · clear h_order h_mother
@@ -577,8 +604,8 @@ lemma hsearch_expand_keeps_on_stack_or_all_neighbours_visited
      → WeightedDiGraph.search_invar_on_stack_or_all_neighbours_visited (hsearch_expandable heur)
           (hsearch_step_expand heur priorState stackHead stackTail)
           := by
-  unfold hsearch_step_expand;
-  simp +zetaDelta at *;
+  unfold hsearch_step_expand
+  simp +zetaDelta at *
   grind
 
 lemma hsearch_expand_keeps_start_visited
@@ -805,12 +832,11 @@ lemma hsearch_expand_keeps_on_stack_or_nei_max_order(goal : V)
           ∧ head ≠ goal
           ∧ state.stack = head :: tail
         → hsearch_invar_on_stack_or_all_neighbours_max_order heur (hsearch_step_expand heur state head tail) := by
-  simp +zetaDelta at *;
-  intro head tail h1 h2 h3 a ha1 ha2 y hy1 hy2;
-  unfold hsearch_step_expand at ha1 ha2 ⊢; simp_all +decide ;
+  simp +zetaDelta at *
+  intro head tail h1 h2 h3 a ha1 ha2 y hy1 hy2
+  unfold hsearch_step_expand at ha1 ha2 ⊢
+  simp_all
   grind
-
-
 
 @[simp]
 abbrev hsearch_invar_start_path_order_zero_zero (start : V) (s : WeightedDiGraph.base_search_state g (ℕ×ℕ)) :=

@@ -390,7 +390,7 @@ lemma nodup_suffix_of_append_nodup {u v w : V}
       -- By definition of `support`, we know that `(uw.append wv).support = uw.support ++ wv.support.tail`.
       have h_support_append : (uw.append wv).support = uw.support ++ wv.support.tail := by
         exact Walk.support_of_append uw wv
-      cases wv <;> simp_all +decide [ List.nodup_append ];
+      cases wv <;> simp_all [ List.nodup_append ];
       · exact List.nodup_singleton _;
       · cases uw
         · by_contra

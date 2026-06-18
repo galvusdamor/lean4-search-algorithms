@@ -18,6 +18,12 @@ abbrev admissible (heur : V → ℕ∞) (goal : V) :=
 abbrev admissible' (heur : V → ℕ∞) (goals : List V) :=
   ∀ v : V, ∀ goal ∈ goals, ∀ p : g.Path v goal, heur v ≤ (p.cost : ℕ∞)
 
+/-- Admissibility for the goal-test version of multi-goal A*: for every node `v` and every
+node `goal` passing the goal test, the heuristic underestimates the true cost from `v` to
+`goal`.  This is the predicate analogue of `admissible'`. -/
+abbrev admissible_test (heur : V → ℕ∞) (is_goal : V → Bool) :=
+  ∀ v : V, ∀ goal : V, is_goal goal = true → ∀ p : g.Path v goal, heur v ≤ (p.cost : ℕ∞)
+
 abbrev goal_aware (heur : V → ℕ∞) (goal : V) := heur goal = 0
 
 abbrev goal_aware' (heur : V → ℕ∞) (goals : List V) := ∀ goal ∈ goals, heur goal = 0
@@ -376,10 +382,10 @@ lemma optimal_cost_le_pathOrder
   -- Since the extracted path's cost is less than or equal to the path order's first component, and d is the minimum cost, we have d ≤ (state.pathOrder v).1.
   have h_extracted_cost_le_path_order : (WeightedDiGraph.extract_path_to start v state hv mother_invar mother_adj decreasing).1.cost ≤ (state.pathOrder v).1 :=
     hsearch_path_extracted_not_longer_than_path_order start state mother_invar mother_adj decreasing diff_invar v hv
-  obtain ⟨ w, hw₁, hw₂ ⟩ := hd;
-  contrapose! h_extracted_cost_le_path_order;
-  refine lt_of_lt_of_le h_extracted_cost_le_path_order ?_;
-  convert hw₂ _;
+  obtain ⟨ w, hw₁, hw₂ ⟩ := hd
+  contrapose! h_extracted_cost_le_path_order
+  refine lt_of_lt_of_le h_extracted_cost_le_path_order ?_
+  convert hw₂ _
   exact hw₁.symm
 
 
@@ -418,7 +424,7 @@ lemma pathOrder_ge_optimal_after_expand
       → ∀ v : V, v ∈ state.visited → ∀ d : ℕ, g.cost_is start v d →
         d ≤ ((hsearch_step_expand heur state head tail).pathOrder v).1 := by
   intros head tail hstack v hv d hd
-  by_cases hv_adj_head : ∃ adj : g.Adj head v, True;
+  by_cases hv_adj_head : ∃ adj : g.Adj head v, True
   · -- By definition of `extract_path_to`, there exists a walk from `start` to `head` with cost ≤ `pathOrder(head)`.
     have head_vis : head ∈ state.visited := stack_visited head (by rw [hstack]; simp)
     obtain ⟨walk_head, hwalk_head⟩ : ∃ walk_head : g.Walk start head, walk_head.cost ≤ (state.pathOrder head).1 := by
@@ -427,23 +433,21 @@ lemma pathOrder_ge_optimal_after_expand
     -- By definition of `Walk.concat`, there exists a walk from `start` to `v` with cost ≤ `pathOrder(head) + edgeCost(head,v)`.
     obtain ⟨walk_v, hwalk_v⟩ : ∃ walk_v : g.Walk start v, walk_v.cost ≤ (state.pathOrder head).1 + g.edgeCost (hv_adj_head.choose) := by
       use walk_head.concat hv_adj_head.choose
-      simp [Walk.concat];
-      exact add_le_add hwalk_head le_rfl;
+      simp [Walk.concat]
+      exact add_le_add hwalk_head le_rfl
     have hwalk_v_min : d ≤ min ((state.pathOrder v).1) ((state.pathOrder head).1 + g.edgeCost (hv_adj_head.choose)) := by
       have hwalk_v_min : d ≤ walk_v.cost := by
         have hwalk_v_cost : ∀ p : g.Path start v, p.cost ≥ d := by
           intro p; exact (by
-          obtain ⟨ p', hp' ⟩ := hd;
-          exact hp'.1 ▸ hp'.2 p |> le_trans ( by rfl ) |> le_trans <| by rfl;);
+          obtain ⟨ p', hp' ⟩ := hd
+          exact hp'.1 ▸ hp'.2 p |> le_trans ( by rfl ) |> le_trans <| by rfl;)
         have hwalk_v_cost : ∃ p : g.Path start v, p.val.cost ≤ walk_v.cost := by
           obtain ⟨p', hp'⟩ := walk_v.cheaper_path_exists
           exact ⟨p', by unfold Path.cost at hp'; exact hp'⟩
-        generalize_proofs at *; (
-        exact le_trans ( by solve_by_elim ) hwalk_v_cost.choose_spec)
-      generalize_proofs at *; (
+        exact le_trans (by solve_by_elim) hwalk_v_cost.choose_spec
       apply le_min
-      exact optimal_cost_le_pathOrder state mother_invar mother_adj decreasing diff_invar v hv d hd
-      exact hwalk_v_min.trans hwalk_v)
+      · exact optimal_cost_le_pathOrder state mother_invar mother_adj decreasing diff_invar v hv d hd
+      · exact hwalk_v_min.trans hwalk_v
     unfold hsearch_step_expand
     simp only [new_cost]
     split_ifs <;> simp_all [path_val]
@@ -551,7 +555,8 @@ lemma find_open_on_walk_suffix
         exact hq_cheapest ⟨start_w, start_w_nodup⟩
       have h2 : start_w.cost ≤ q.cost := by
         exact start_w_cheapest q
-      rw [← hq_cost]; omega
+      rw [← hq_cost]
+      exact le_antisymm h2 h1
     -- Subpath from start to w' is cheapest
     have start_w'_cheapest : WeightedDiGraph.Path.is_cheapest
         (⟨start_w.concat adj_w_w', start_w'_nodup⟩ : g.Path start w') :=
@@ -642,19 +647,18 @@ lemma astar_invar_from_state_properties
     astar_invar heur start s := by
   intro v hv_not_closed p hp_cheapest p_expandable
   by_cases hv_start : v = start
-  generalize_proofs at *; (
-  -- Since $v = start$, the path from $start$ to $v$ is just the start itself. Therefore, $start$ is the node we're looking for.
-  use start
-  simp [hv_start, start_pathOrder_zero] at *; (
-  exact ⟨ hv_not_closed start_visited, by exact cost_v_v start ⟩));
+  · -- Since `v = start`, the start node is the open node we are looking for.
+    use start
+    simp [hv_start, start_pathOrder_zero] at *
+    exact ⟨hv_not_closed start_visited, cost_v_v start⟩
   -- Since v is not closed, start is open and we can apply the finding open node from closed node lemma.
-  by_cases hv_open : node_open s start;
-  · refine ⟨ start, ?_, hv_open, by simpa [ start_pathOrder_zero ] using cost_v_v start ⟩
-    exact WeightedDiGraph.Walk.start_in_support p.1
-  · exact find_open_on_path_from_closed heur on_stack_or_nei closed_bound_s pathOrder_ge_g
-      hv_not_closed hp_cheapest p_expandable (w := start)
-      (WeightedDiGraph.Walk.start_in_support p.1) (Ne.symm hv_start)
-      ⟨start_visited, hv_open⟩ (by rw [start_pathOrder_zero]; exact cost_v_v start)
+  · by_cases hv_open : node_open s start
+    · refine ⟨start, ?_, hv_open, by simpa [start_pathOrder_zero] using cost_v_v start⟩
+      exact WeightedDiGraph.Walk.start_in_support p.1
+    · exact find_open_on_path_from_closed heur on_stack_or_nei closed_bound_s pathOrder_ge_g
+        hv_not_closed hp_cheapest p_expandable (w := start)
+        (WeightedDiGraph.Walk.start_in_support p.1) (Ne.symm hv_start)
+        ⟨start_visited, hv_open⟩ (by rw [start_pathOrder_zero]; exact cost_v_v start)
 
 
 /-- After expansion, the optimal cost is ≤ pathOrder for all visited nodes in the new state. -/
@@ -688,7 +692,10 @@ lemma pathOrder_ge_optimal_all_after_expand
       Walk.concat_inc_cost_by_edge extracted.1.val adj
     rw [po_eq]
     unfold Path.cost at hwalk
-    omega
+    calc d ≤ (extracted.1.val.concat adj).cost := d_le
+      _ = g.edgeCost adj + extracted.1.val.cost := walk_cost
+      _ ≤ g.edgeCost adj + (state.pathOrder head).1 := Nat.add_le_add_left hwalk _
+      _ = (state.pathOrder head).1 + g.edgeCost adj := Nat.add_comm _ _
 
 
 lemma astar_expand_keeps_main_invar (goal : V)
@@ -777,6 +784,7 @@ lemma astar_all_invar_preserved :
   · exact hsearch_expand_keeps_visited_heur_finite heur s head tail heur_fin
   · exact hsearch_expand_start_path_order_zero_carries heur s start goal start_vis head tail
       ⟨start_zero, head_ne_goal, stack_compose⟩
+
 /-- Every node on a path to `goal` has a finite heuristic value when the heuristic
 is admissible: the suffix of the path starting at that node is itself a path to the
 goal, so its (finite) cost bounds the heuristic estimate from above. -/
@@ -1035,14 +1043,30 @@ namespace NatGraph
 
 variable (heur : V → ℕ∞)
 
+/-- Admissibility for the artificial-goal reduction parameterised by a goal *predicate*:
+the heuristic underestimates the true cost from every node `v` to every node `goal`
+satisfying `is_goal`.  This is the common generalisation of `admissible'` (where the
+predicate is list membership) and `admissible_test` (where the predicate is a `Bool`-valued
+test). -/
+abbrev admissible_pred (is_goal : V → Prop) :=
+  ∀ v : V, ∀ goal : V, is_goal goal → ∀ p : g.Path v goal, heur v ≤ (p.cost : ℕ∞)
 
 def opt_heur : Option V → ℕ∞ := fun v =>
     match v with
     | none => 0
     | some v' => heur v'
 
-def astar_multigoal (start : V) (goals : List V): Option ((thegoal : {v : V // v ∈ goals}) × g.Path start thegoal) :=
-  let nGraph : NatGraph (Option V) := g.add_artificial_goal goals
+/-! ### Multi-goal A* via an artificial goal node, parameterised by a goal predicate
+
+The core of multi-goal A*.  Given a decidable goal predicate `is_goal`, we add a single
+artificial sink `none` connected (with zero cost) to every node satisfying `is_goal`, and run
+single-goal A* towards `none`.  The set of goals is therefore determined *purely by the goal
+test*: an edge to the artificial goal exists exactly when the test succeeds, with no need to
+enumerate the goals beforehand.  Both the list-based `astar_multigoal` and the test-based
+`astar_multigoal_test` are thin specialisations of this core. -/
+def astar_multigoal_aux (start : V) (is_goal : V → Prop) [DecidablePred is_goal] :
+    Option ((thegoal : {v : V // is_goal v}) × g.Path start thegoal) :=
+  let nGraph : NatGraph (Option V) := g.add_artificial_goal is_goal
   let ret : Option (nGraph.Path start none) := nGraph.astar (opt_heur heur) start none
 
   match ret with
@@ -1055,7 +1079,7 @@ def astar_multigoal (start : V) (goals : List V): Option ((thegoal : {v : V // v
       simp at prop
       grind
     let w' : V := w.get w_is_some
-    have w_is_goal : w' ∈ goals := by
+    have w_is_goal : is_goal w' := by
       unfold nGraph NatGraph.add_artificial_goal at prop
       simp at prop
       grind
@@ -1064,41 +1088,37 @@ def astar_multigoal (start : V) (goals : List V): Option ((thegoal : {v : V // v
     have p : g.Path start w' := NatGraph.translate_path (G:=g) (w_eq_some_w' ▸ path) (pp)
     use Option.some ⟨⟨w',w_is_goal⟩,p⟩
 
-theorem astar_multigoal_is_sound (start : V) (goals : List V) :
-    (Option.isSome (astar_multigoal (g:=g) heur start goals) → (∃ goal ∈ goals, ∃ x : (g.Path start goal), x = x)) := by
+theorem astar_multigoal_aux_is_sound (start : V) (is_goal : V → Prop) [DecidablePred is_goal] :
+    (Option.isSome (astar_multigoal_aux (g:=g) heur start is_goal) →
+      (∃ goal : V, is_goal goal ∧ ∃ x : (g.Path start goal), x = x)) := by
     intro retSome
-    let ret := g.astar_multigoal heur start goals
+    let ret := astar_multigoal_aux (g:=g) heur start is_goal
     let theGoal := (ret.get retSome).1
     let thePath := (ret.get retSome).2
     use theGoal
     constructor
     · exact theGoal.prop
-    · constructor
-      · rfl
-      · use thePath
-        exact thePath.prop
+    · exact ⟨thePath, rfl⟩
 
 
 /-- Lifting an expandable path to the augmented graph: if every node of a path
-`p : g.Path start goal` (with `goal ∈ goals`) has a finite heuristic value, then there
+`p : g.Path start goal` (with `is_goal goal`) has a finite heuristic value, then there
 is a path from `some start` to `none` in the augmented graph all of whose nodes have a
-finite `opt_heur heur` value.  The lifted path is `p` (with each node wrapped in `some`)
-followed by the artificial zero-cost edge to `none`; `none` is mapped to `0` by
-`opt_heur`, and every other node inherits finiteness from `p`. -/
-lemma augmented_expandable_path {goals : List V} {start goal : V}
-    (goal_in_goals : goal ∈ goals)
+finite `opt_heur heur` value. -/
+lemma augmented_expandable_path {is_goal : V → Prop} [DecidablePred is_goal] {start goal : V}
+    (goal_is_goal : is_goal goal)
     (p : g.Path start goal)
     (hp : ∀ u ∈ p.support, heur u ≠ ⊤) :
-    ∃ q : (g.add_artificial_goal goals).Path (some start) none,
+    ∃ q : (g.add_artificial_goal is_goal).Path (some start) none,
       ∀ u ∈ q.support, hsearch_expandable (opt_heur heur) u := by
-  have adj_none : (g.add_artificial_goal goals).Adj (some goal) none := by
+  have adj_none : (g.add_artificial_goal is_goal).Adj (some goal) none := by
     unfold NatGraph.add_artificial_goal; simp_all
-  have w_supp : (NatGraph.lift_walk_to_augmented (G:=g) (goals:=goals) p.val).support
+  have w_supp : (NatGraph.lift_walk_to_augmented (G:=g) (is_goal:=is_goal) p.val).support
       = p.val.support.map some := NatGraph.lift_walk_support_eq p.val
-  have wc_supp : (((NatGraph.lift_walk_to_augmented (G:=g) (goals:=goals) p.val).concat adj_none)).support
+  have wc_supp : (((NatGraph.lift_walk_to_augmented (G:=g) (is_goal:=is_goal) p.val).concat adj_none)).support
       = p.val.support.map some ++ [none] := by
     simp [w_supp]
-  have wc_nodup : (((NatGraph.lift_walk_to_augmented (G:=g) (goals:=goals) p.val).concat adj_none)).support.Nodup := by
+  have wc_nodup : (((NatGraph.lift_walk_to_augmented (G:=g) (is_goal:=is_goal) p.val).concat adj_none)).support.Nodup := by
     rw [wc_supp, List.nodup_append]
     refine ⟨p.prop.map (Option.some_injective V), by simp, ?_⟩
     intro a ha b hb
@@ -1106,7 +1126,7 @@ lemma augmented_expandable_path {goals : List V} {start goal : V}
     subst hb
     obtain ⟨x, _, rfl⟩ := List.mem_map.mp ha
     exact Option.some_ne_none x
-  refine ⟨⟨(NatGraph.lift_walk_to_augmented (G:=g) (goals:=goals) p.val).concat adj_none, wc_nodup⟩, ?_⟩
+  refine ⟨⟨(NatGraph.lift_walk_to_augmented (G:=g) (is_goal:=is_goal) p.val).concat adj_none, wc_nodup⟩, ?_⟩
   intro u hu
   have hu' : u ∈ p.val.support.map some ++ [none] := by
     rw [← wc_supp]; exact hu
@@ -1118,62 +1138,45 @@ lemma augmented_expandable_path {goals : List V} {start goal : V}
     subst h
     simp [opt_heur, hsearch_expandable]
 
-/-- A* over multiple goals is complete: if there is a path from `start` to some node in
-`goals` all of whose nodes have a *finite* heuristic value, then `astar_multigoal`
-finds a path.  As for `astar_is_complete`, the finiteness hypothesis is necessary
-because nodes whose heuristic estimates an infinite distance are disregarded. -/
-theorem astar_multigoal_is_complete (start : V) (goals : List V):
-    ((∃ goal ∈ goals, ∃ p : (g.Path start goal), ∀ u ∈ p.support, heur u ≠ ⊤) →
-      Option.isSome (astar_multigoal (g:=g) heur start goals)) := by
+/-- The core multi-goal A* is complete: if there is a path from `start` to some node satisfying
+`is_goal` all of whose nodes have a *finite* heuristic value, then it finds a path.  The
+finiteness hypothesis is necessary because nodes whose heuristic estimates an infinite distance
+are disregarded. -/
+theorem astar_multigoal_aux_is_complete (start : V) (is_goal : V → Prop) [DecidablePred is_goal] :
+    ((∃ goal : V, is_goal goal ∧ ∃ p : (g.Path start goal), ∀ u ∈ p.support, heur u ≠ ⊤) →
+      Option.isSome (astar_multigoal_aux (g:=g) heur start is_goal)) := by
   rintro ⟨goal, hgoal, x, hx⟩
   obtain ⟨q, hq_exp⟩ := augmented_expandable_path heur hgoal x hx
   have h_astar : Option.isSome
-      (astar (g:=g.add_artificial_goal goals) (opt_heur heur) (some start) none) :=
-    NatGraph.astar_is_complete (g := g.add_artificial_goal goals) (opt_heur heur)
+      (astar (g:=g.add_artificial_goal is_goal) (opt_heur heur) (some start) none) :=
+    NatGraph.astar_is_complete (g := g.add_artificial_goal is_goal) (opt_heur heur)
       (some start) none ⟨q, hq_exp⟩
-  unfold astar_multigoal
+  unfold astar_multigoal_aux
   dsimp only
   split <;> simp_all
 
-/-
-PROBLEM
-If admissible' holds on g, then opt_heur is admissible on the augmented graph for target none.
-
-PROVIDED SOLUTION
-We need to show: ∀ v : Option V, (g.add_artificial_goal goals).cost_ge v none (opt_heur heur v).
-
-Unfolding cost_ge: ∀ p : (g.add_artificial_goal goals).Path v none, p.cost ≥ opt_heur heur v.
-
-Case v = none: opt_heur heur none = 0, and p.cost ≥ 0 trivially for ℕ.
-
-Case v = some v': opt_heur heur (some v') = heur v'. Let p be a path from (some v') to none. Since some v' ≠ none, use Path.split_at_end to decompose p = p' ++ [w_adj_none] where p' is a path from (some v') to w and w is adjacent to none. Since w is adjacent to none in add_artificial_goal, w must be some w' for some w' ∈ goals (by definition of add_artificial_goal, none has no outgoing edges and the only edges to none are from some g where g ∈ goals).
-
-Now p' is a path from (some v') to (some w') with none ∉ p'.support (from split_at_end). Translate p' to get q : g.Path v' w' with q.cost = p'.cost (by translate_walk_cost_eq). Since w' ∈ goals and is_admissible says heur v' ≤ q.cost for all g.Path from v' to w', we get heur v' ≤ q.cost = p'.cost.
-
-p.cost = p'.cost + edgeCost(w_adj_none). The edge from (some w') to none has cost 0 in add_artificial_goal. So p.cost = p'.cost + 0 = p'.cost ≥ heur v'.
-
-To get p.cost from the split: use the fact that p.val = p'.val.concat w_adj_none, so p.cost = p'.cost + 0 by Walk.concat_inc_cost_by_edge and the fact that edgeCost of the artificial edge is 0.
--/
-lemma opt_heur_admissible {goals : List V}
-    (is_admissible : g.admissible' heur goals) :
-    (g.add_artificial_goal goals).admissible (opt_heur heur) none := by
+/-- If `admissible_pred` holds on `g`, then `opt_heur` is admissible on the augmented graph for
+target `none`. -/
+lemma opt_heur_admissible {is_goal : V → Prop} [DecidablePred is_goal]
+    (is_admissible : g.admissible_pred heur is_goal) :
+    (g.add_artificial_goal is_goal).admissible (opt_heur heur) none := by
       intro v p
       by_cases hv : v = none
       · unfold opt_heur
         subst hv
         simp_all only [WeightedDiGraph.Path.cost_same, zero_le]
       · obtain ⟨ v', rfl ⟩ := Option.ne_none_iff_exists'.mp hv
-        obtain ⟨w, hw⟩ : ∃ w : V, ∃ p' : (g.add_artificial_goal goals).Path (some v') (some w), ∃ w_adj_none : (g.add_artificial_goal goals).Adj w none, none∉ p'.support ∧ p.val = p'.val.concat w_adj_none := by
-          obtain ⟨w, hw⟩ : ∃ w : Option V, ∃ p' : (g.add_artificial_goal goals).Path (some v') w, ∃ w_adj_none : (g.add_artificial_goal goals).Adj w none, none∉ p'.support ∧ p.val = p'.val.concat w_adj_none := by
-            exact WeightedDiGraph.Path.split_at_end p hv;
-          cases w <;> tauto;
+        obtain ⟨w, hw⟩ : ∃ w : V, ∃ p' : (g.add_artificial_goal is_goal).Path (some v') (some w), ∃ w_adj_none : (g.add_artificial_goal is_goal).Adj w none, none∉ p'.support ∧ p.val = p'.val.concat w_adj_none := by
+          obtain ⟨w, hw⟩ : ∃ w : Option V, ∃ p' : (g.add_artificial_goal is_goal).Path (some v') w, ∃ w_adj_none : (g.add_artificial_goal is_goal).Adj w none, none∉ p'.support ∧ p.val = p'.val.concat w_adj_none := by
+            exact WeightedDiGraph.Path.split_at_end p hv
+          cases w <;> tauto
         obtain ⟨ p', w_adj_none, hp'_none, hp_eq ⟩ := hw
         have h_cost_p' : heur v' ≤ (p'.cost : ℕ∞) := by
           have h_cost_p' : ∃ q : g.Path v' w, q.cost = p'.cost := by
             exact ⟨ NatGraph.translate_path (G:=g) p' hp'_none, NatGraph.translate_walk_cost_eq _ hp'_none ⟩
-          obtain ⟨ q, hq ⟩ := h_cost_p';
+          obtain ⟨ q, hq ⟩ := h_cost_p'
           exact le_of_le_of_eq (is_admissible v' w w_adj_none q) (by rw [hq])
-        have h_cost_p : p.cost = p'.cost + (g.add_artificial_goal goals).edgeCost w_adj_none := by
+        have h_cost_p : p.cost = p'.cost + (g.add_artificial_goal is_goal).edgeCost w_adj_none := by
           grind +suggestions
         unfold opt_heur
         rw [h_cost_p]
@@ -1181,39 +1184,17 @@ lemma opt_heur_admissible {goals : List V}
         push_cast
         exact le_self_add
 
-/-
-PROBLEM
-When astar_multigoal returns some, the underlying astar also returns some.
-
-PROVIDED SOLUTION
-Unfold astar_multigoal. It matches on astar (opt_heur heur) (some start) none. If the astar returns none, then astar_multigoal returns none, contradicting returned_path. So astar must return some.
--/
-lemma astar_multigoal_some_implies_astar_some (start : V) (goals : List V)
-    (returned_path : Option.isSome (astar_multigoal (g:=g) heur start goals)) :
-    Option.isSome (astar (g:=g.add_artificial_goal goals) (opt_heur heur) (some start) none) := by
-      unfold astar_multigoal at returned_path
-      simp_all only
-      split at returned_path
-      next ret heq => simp_all only [Option.isSome_none, Bool.false_eq_true]
-      next ret p heq => simp_all only [Option.isSome_some]
-
-/-
-PROBLEM
-The goal returned by astar_multigoal is in the goals list.
-
-PROVIDED SOLUTION
-Unfold astar_multigoal. In the some case, the returned goal is w' which was shown to be in goals (w_is_goal in the definition). The .1 of the returned value is w' which is in goals.
--/
-lemma astar_multigoal_goal_in_goals (start : V) (goals : List V)
-    (returned_path : Option.isSome (astar_multigoal (g:=g) heur start goals)) :
-    ((astar_multigoal (g:=g) heur start goals).get returned_path).1.val ∈ goals := by
-      have h_some : ∃ aug_path, astar (g:=g.add_artificial_goal goals) (opt_heur heur) (some start) none = some aug_path := by
-        unfold astar_multigoal at returned_path
-        cases h : astar (g:=g.add_artificial_goal goals) (opt_heur heur) (some start) none with
+/-- The goal returned by the core multi-goal A* satisfies the goal predicate. -/
+lemma astar_multigoal_aux_goal_sat (start : V) (is_goal : V → Prop) [DecidablePred is_goal]
+    (returned_path : Option.isSome (astar_multigoal_aux (g:=g) heur start is_goal)) :
+    is_goal ((astar_multigoal_aux (g:=g) heur start is_goal).get returned_path).1.val := by
+      have h_some : ∃ aug_path, astar (g:=g.add_artificial_goal is_goal) (opt_heur heur) (some start) none = some aug_path := by
+        unfold astar_multigoal_aux at returned_path
+        cases h : astar (g:=g.add_artificial_goal is_goal) (opt_heur heur) (some start) none with
         | none => simp [h] at returned_path
         | some p => exact ⟨p, rfl⟩
       obtain ⟨aug_path, h_eq⟩ := h_some
-      unfold astar_multigoal
+      unfold astar_multigoal_aux
       simp only [h_eq, Option.get_some]
       obtain ⟨w, path_to_w, w_adj_none⟩ := aug_path.snoc (by simp)
       simp only
@@ -1222,13 +1203,13 @@ lemma astar_multigoal_goal_in_goals (start : V) (goals : List V)
       simp [hw_in]
 
 
-/-- The cost of the returned multigoal path is ≤ the cost of the augmented A* path. -/
-lemma astar_multigoal_cost_le_aug (start : V) (goals : List V)
-    (returned_path : Option.isSome (astar_multigoal (g:=g) heur start goals))
-    (aug_path : (g.add_artificial_goal goals).Path (some start) none)
-    (h_eq : astar (g:=g.add_artificial_goal goals) (opt_heur heur) (some start) none = some aug_path) :
-    ((astar_multigoal (g:=g) heur start goals).get returned_path).2.cost ≤ aug_path.cost := by
-      delta astar_multigoal at returned_path ⊢
+/-- The cost of the returned core multigoal path is ≤ the cost of the augmented A* path. -/
+lemma astar_multigoal_aux_cost_le_aug (start : V) (is_goal : V → Prop) [DecidablePred is_goal]
+    (returned_path : Option.isSome (astar_multigoal_aux (g:=g) heur start is_goal))
+    (aug_path : (g.add_artificial_goal is_goal).Path (some start) none)
+    (h_eq : astar (g:=g.add_artificial_goal is_goal) (opt_heur heur) (some start) none = some aug_path) :
+    ((astar_multigoal_aux (g:=g) heur start is_goal).get returned_path).2.cost ≤ aug_path.cost := by
+      delta astar_multigoal_aux at returned_path ⊢
       dsimp only [] at returned_path ⊢
       revert returned_path
       rw [h_eq]
@@ -1246,43 +1227,114 @@ lemma astar_multigoal_cost_le_aug (start : V) (goals : List V)
       rw [WeightedDiGraph.Walk.concat_inc_cost_by_edge]
       apply Nat.le_add_left
 
-theorem astar_multigoal_is_optimal (start : V) (goals : List V)
-    (is_admissible : g.admissible' heur goals)
-    (returned_path : Option.isSome (astar_multigoal (g:=g) heur start goals)):
-    ((astar_multigoal (g:=g) heur start goals).get returned_path).2.is_cheapest := by
+/-- The core multi-goal A* is optimal: under an admissible heuristic, the returned path is a
+cheapest path to its goal. -/
+theorem astar_multigoal_aux_is_optimal (start : V) (is_goal : V → Prop) [DecidablePred is_goal]
+    (is_admissible : g.admissible_pred heur is_goal)
+    (returned_path : Option.isSome (astar_multigoal_aux (g:=g) heur start is_goal)):
+    ((astar_multigoal_aux (g:=g) heur start is_goal).get returned_path).2.is_cheapest := by
       -- Extract the augmented A* path
-      have h_some : ∃ aug_path, astar (g:=g.add_artificial_goal goals) (opt_heur heur) (some start) none = some aug_path := by
-        unfold astar_multigoal at returned_path
-        cases h : astar (g:=g.add_artificial_goal goals) (opt_heur heur) (some start) none with
+      have h_some : ∃ aug_path, astar (g:=g.add_artificial_goal is_goal) (opt_heur heur) (some start) none = some aug_path := by
+        unfold astar_multigoal_aux at returned_path
+        cases h : astar (g:=g.add_artificial_goal is_goal) (opt_heur heur) (some start) none with
         | none => simp [h] at returned_path
         | some p => exact ⟨p, rfl⟩
       obtain ⟨aug_path, h_eq⟩ := h_some
       -- The augmented path is optimal
       have aug_optimal : aug_path.is_cheapest := by
-        have aug_ret : Option.isSome (astar (g:=g.add_artificial_goal goals) (opt_heur heur) (some start) none) := by
+        have aug_ret : Option.isSome (astar (g:=g.add_artificial_goal is_goal) (opt_heur heur) (some start) none) := by
           rw [h_eq]; simp
-        have h := astar_is_optimal (g:=g.add_artificial_goal goals) (opt_heur heur) (some start) none
+        have h := astar_is_optimal (g:=g.add_artificial_goal is_goal) (opt_heur heur) (some start) none
           (opt_heur_admissible heur is_admissible) aug_ret
-        have h_get : (astar (g:=g.add_artificial_goal goals) (opt_heur heur) (some start) none).get aug_ret = aug_path := by
+        have h_get : (astar (g:=g.add_artificial_goal is_goal) (opt_heur heur) (some start) none).get aug_ret = aug_path := by
           simp [h_eq]
         rw [h_get] at h
         exact h
       -- Use sufficient_cheapest_path_cheaper
       apply WeightedDiGraph.Path.sufficient_cheapest_path_cheaper
       intro p' p'_cheapest
-      -- thegoal ∈ goals
-      have thegoal_in : ((astar_multigoal (g:=g) heur start goals).get returned_path).1.val ∈ goals :=
-        astar_multigoal_goal_in_goals heur start goals returned_path
+      -- thegoal satisfies is_goal
+      have thegoal_sat : is_goal ((astar_multigoal_aux (g:=g) heur start is_goal).get returned_path).1.val :=
+        astar_multigoal_aux_goal_sat heur start is_goal returned_path
       -- Lift p' to the augmented graph
-      obtain ⟨aug_p', h_cost_eq⟩ := lift_path_to_augmented_cost (G:=g) thegoal_in p'
+      obtain ⟨aug_p', h_cost_eq⟩ := lift_path_to_augmented_cost (G:=g) thegoal_sat p'
       -- aug_path.cost ≤ p'.cost
       have h1 : aug_path.cost ≤ p'.cost := by
         calc aug_path.cost ≤ aug_p'.cost := aug_optimal aug_p'
           _ = p'.cost := h_cost_eq
       -- returned.cost ≤ aug_path.cost (from the helper lemma)
-      have h2 := astar_multigoal_cost_le_aug heur start goals returned_path aug_path h_eq
+      have h2 := astar_multigoal_aux_cost_le_aug heur start is_goal returned_path aug_path h_eq
       -- Combine
       exact le_trans h2 h1
+
+
+/-! ### Multi-goal A* with an explicit list of goals
+
+The list-based interface is the specialisation of `astar_multigoal_aux` to the goal predicate
+"membership in `goals`". -/
+
+/-- Multi-goal A* with an explicit list of goals. -/
+def astar_multigoal (start : V) (goals : List V) :
+    Option ((thegoal : {v : V // v ∈ goals}) × g.Path start thegoal) :=
+  astar_multigoal_aux heur start (· ∈ goals)
+
+theorem astar_multigoal_is_sound (start : V) (goals : List V) :
+    (Option.isSome (astar_multigoal (g:=g) heur start goals) →
+      (∃ goal ∈ goals, ∃ x : (g.Path start goal), x = x)) :=
+  astar_multigoal_aux_is_sound heur start (· ∈ goals)
+
+/-- A* over multiple goals is complete: if there is a path from `start` to some node in
+`goals` all of whose nodes have a *finite* heuristic value, then `astar_multigoal`
+finds a path. -/
+theorem astar_multigoal_is_complete (start : V) (goals : List V):
+    ((∃ goal ∈ goals, ∃ p : (g.Path start goal), ∀ u ∈ p.support, heur u ≠ ⊤) →
+      Option.isSome (astar_multigoal (g:=g) heur start goals)) :=
+  astar_multigoal_aux_is_complete heur start (· ∈ goals)
+
+theorem astar_multigoal_is_optimal (start : V) (goals : List V)
+    (is_admissible : g.admissible' heur goals)
+    (returned_path : Option.isSome (astar_multigoal (g:=g) heur start goals)):
+    ((astar_multigoal (g:=g) heur start goals).get returned_path).2.is_cheapest :=
+  astar_multigoal_aux_is_optimal heur start (· ∈ goals) is_admissible returned_path
+
+
+/-! ### Multi-goal A* with a computable goal test
+
+Instead of an explicit list of goals, this interface takes a computable predicate
+`is_goal : V → Bool`.  The artificial-goal graph is built *directly from the goal test*: a node
+`some g` is connected to the artificial goal `none` exactly when `is_goal g = true`.  This avoids
+enumerating all goals up front — only the goal test is used to decide whether an edge exists. -/
+
+/-- A* over a computable goal test.  Reuses the artificial-goal reduction `astar_multigoal_aux`
+with the goal predicate `fun v => is_goal v = true`, so the graph construction is driven entirely
+by the goal test. -/
+def astar_multigoal_test (start : V) (is_goal : V → Bool) :
+    Option ((thegoal : {v : V // is_goal v = true}) × g.Path start thegoal) :=
+  astar_multigoal_aux heur start (fun v => is_goal v = true)
+
+/-- A* over a computable goal test is sound: if it returns a path, there genuinely is a goal
+node (passing the test) reachable from `start`. -/
+theorem astar_multigoal_test_is_sound (start : V) (is_goal : V → Bool) :
+    (Option.isSome (astar_multigoal_test (g:=g) heur start is_goal) →
+      (∃ goal : V, is_goal goal = true ∧ ∃ x : (g.Path start goal), x = x)) :=
+  astar_multigoal_aux_is_sound heur start (fun v => is_goal v = true)
+
+/-- A* over a computable goal test is complete: if there is a path from `start` to some node
+passing the test all of whose nodes have a *finite* heuristic value, then `astar_multigoal_test`
+finds a path.  As for `astar_multigoal_is_complete`, the finiteness hypothesis is necessary
+because nodes whose heuristic estimates an infinite distance are disregarded. -/
+theorem astar_multigoal_test_is_complete (start : V) (is_goal : V → Bool) :
+    ((∃ goal : V, is_goal goal = true ∧ ∃ p : (g.Path start goal), ∀ u ∈ p.support, heur u ≠ ⊤) →
+      Option.isSome (astar_multigoal_test (g:=g) heur start is_goal)) :=
+  astar_multigoal_aux_is_complete heur start (fun v => is_goal v = true)
+
+/-- A* over a computable goal test is optimal: under an admissible heuristic, the returned
+path is a cheapest path to its (test-passing) goal. -/
+theorem astar_multigoal_test_is_optimal (start : V) (is_goal : V → Bool)
+    (is_admissible : g.admissible_test heur is_goal)
+    (returned_path : Option.isSome (astar_multigoal_test (g:=g) heur start is_goal)) :
+    ((astar_multigoal_test (g:=g) heur start is_goal).get returned_path).2.is_cheapest :=
+  astar_multigoal_aux_is_optimal heur start (fun v => is_goal v = true) is_admissible returned_path
 
 
 end NatGraph
