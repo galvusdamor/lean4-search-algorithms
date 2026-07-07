@@ -149,6 +149,33 @@ def hsearch_termination_metric
 
     (v , s.stack.length)
 
+/-- A termination metric for the heuristic search whose *type* does not depend on the
+number of vertices `g.nodeNum`.  The original `hsearch_termination_metric` returns a
+`Vector _ g.nodeNum`, and constructing the well-founded-relation dictionary for that type
+forces `g.nodeNum = Fintype.card V` at run time; for a `FinEnum` graph this enumerates the
+whole vertex set (`O(|V|)` and stack-unsafe), so even a search that expands a handful of
+nodes pays an `Θ(|V|)` (in practice `Θ(|V|²)`) tax and crashes on large graphs.
+
+This metric is valued in `ℕ × ℕ × ℕ × ℕ` (lexicographic), so its type mentions no
+`nodeNum`; the well-founded-relation dictionary is `nodeNum`-free and nothing is forced at
+run time.  The *value* may still refer to `Fintype.card V` — that is fine, because a
+termination metric is only used inside the (erased) well-foundedness argument and is never
+computed when the search runs.
+
+The four lexicographic components are:
+1. `Fintype.card V - visited.card` — strictly decreases whenever a new vertex is visited;
+2. `∑ v ∈ visited, (pathOrder v).1` — the total (finite) path cost of visited vertices,
+   which is non-increasing and strictly decreases on a decrease-key step that lowers a cost;
+3. `∑ v ∈ visited, (pathOrder v).2` — the tie-breaking length component, handling
+   decrease-key steps that only lower the tie-breaker;
+4. `stack.length` — strictly decreases on a step that neither visits a new node nor relaxes
+   any distance (the frontier simply shrinks). -/
+def hsearch_termination_metric_nat
+    (s : hsearch_search_state g) : ℕ × ℕ × ℕ × ℕ :=
+    (Fintype.card V - s.visited.card,
+     ∑ v ∈ s.visited, (s.pathOrder v).1,
+     ∑ v ∈ s.visited, (s.pathOrder v).2,
+     s.stack.length)
 --set_option trace.Meta.synthInstance true
 --set_option pp.all true
 
@@ -226,7 +253,7 @@ lemma hsearch_expand_metric_reduction : WeightedDiGraph.termination_proof_for_ex
     unfold WeightedDiGraph.termination_proof_for_expand
     intro state head tail ⟨head_ne_goal,compose⟩
     unfold WellFoundedRelation.rel
-    unfold instWellFoundedRelationProdVectorWithTopNat_searchAlgorithms
+    unfold wf_prod_vector_withTop_nat
     apply Prod.lex_iff.mpr
     apply (Classical.or_iff_not_imp_left).mpr
     contrapose
@@ -627,6 +654,44 @@ lemma hsearch_expand_visited_subset (priorState : hsearch_search_state  g)
     priorState.visited ⊆ (hsearch_step_expand heur priorState stackHead stackTail).visited := by
     unfold hsearch_step_expand
     simp_all
+/-- The `nodeNum`-free termination metric `hsearch_termination_metric_nat` also decreases on
+every non-terminating expansion.  See `hsearch_termination_metric_nat` for why this metric is
+preferable at run time. -/
+lemma hsearch_expand_metric_reduction_nat :
+    WeightedDiGraph.termination_proof_for_expand (G:=g) (state_type := hsearch_search_state g)
+      (D:=ℕ ×ℕ) (hsearch_step_expand heur) goal hsearch_termination_metric_nat := by
+  intros state head tail h_expand
+  simp [hsearch_termination_metric_nat] at *;
+  by_cases h_card : (hsearch_step_expand heur state head tail).visited.card > state.visited.card;
+  · exact Prod.Lex.left _ _ ( Nat.sub_lt_sub_left ( by
+      exact lt_of_lt_of_le h_card ( Finset.card_le_univ _ ) ) h_card );
+  · have h_sub : state.visited ⊆ (hsearch_step_expand heur state head tail).visited :=
+      hsearch_expand_visited_subset heur state head tail
+    have h_card_eq : (hsearch_step_expand heur state head tail).visited = state.visited :=
+      (Finset.eq_of_subset_of_card_le h_sub (by omega)).symm
+    have h_cost_fst : ∀ v ∈ state.visited, ((hsearch_step_expand heur state head tail).pathOrder v).1 ≤ (state.pathOrder v).1 :=
+      hsearch_expand_pathOrder_fst_le heur state head tail
+    by_cases h_cost_fst_eq : ∀ v ∈ state.visited, ((hsearch_step_expand heur state head tail).pathOrder v).1 = (state.pathOrder v).1;
+    · have h_cost_snd : ∀ v ∈ state.visited, ((hsearch_step_expand heur state head tail).pathOrder v).2 ≤ (state.pathOrder v).2 := by
+        unfold hsearch_step_expand at *; simp_all +decide [ new_cost ] ;
+        grind;
+      by_cases h_cost_snd_eq : ∀ v ∈ state.visited, ((hsearch_step_expand heur state head tail).pathOrder v).2 = (state.pathOrder v).2;
+      · have h_newly_visited_empty : (hsearch_step_expand heur state head tail).visited = state.visited → (hsearch_step_expand heur state head tail).stack.length < state.stack.length := by
+          unfold hsearch_step_expand; simp +decide ;
+          intro h; rw [ show state.stack = head :: tail from h_expand.2 ] ; simp +decide [ List.length ] ;
+          unfold hsearch_step_expand at h_cost_fst_eq; simp_all +decide [ Finset.subset_iff ] ;
+          grind;
+        simp_all +decide [ WellFoundedRelation.rel ];
+        exact Prod.Lex.right _ ( Prod.Lex.right _ ( Prod.Lex.right _ ( by simpa using h_newly_visited_empty ) ) );
+      · simp_all +decide [ WellFoundedRelation.rel ];
+        refine' Prod.Lex.right _ _;
+        refine' Prod.Lex.right _ _;
+        refine' Prod.Lex.left _ _ _;
+        exact Finset.sum_lt_sum ( fun x hx => h_cost_snd x hx ) ( by obtain ⟨ x, hx₁, hx₂ ⟩ := h_cost_snd_eq; exact ⟨ x, hx₁, lt_of_le_of_ne ( h_cost_snd x hx₁ ) hx₂ ⟩ );
+    · simp_all +decide [ WellFoundedRelation.rel ];
+      refine' Prod.Lex.right _ _;
+      refine' Prod.Lex.left _ _ _;
+      exact Finset.sum_lt_sum ( fun x hx => h_cost_fst x hx ) ( by obtain ⟨ x, hx₁, hx₂ ⟩ := h_cost_fst_eq; exact ⟨ x, hx₁, lt_of_le_of_ne ( h_cost_fst x hx₁ ) hx₂ ⟩ )
 
 lemma hsearch_expand_keeps_goal_on_stack :
    WeightedDiGraph.base_invar_carries_over_expand (state_type := hsearch_search_state g) (hsearch_step_expand heur) goal (WeightedDiGraph.search_prop_goal_on_stack (G:=g) (D:=ℕ × ℕ) goal):= by

@@ -397,6 +397,33 @@ decreasing_by
   apply result_is_none
 
 
+/-
+The result of `search_recurse` does not depend on the termination metric (nor on the
+decreasing proof): both only steer the well-founded recursion, they are never inspected to
+produce the returned value.  This lets a caller swap the metric for a cheaper one (e.g. one
+whose *type* does not force `Fintype.card V` at run time) without changing the result.
+-/
+theorem search_recurse_metric_irrel
+    {T' : Type} [WellFoundedRelation T']
+    (priorState : state_type)
+    (search_step : search_step_function G D state_type)
+    (termination_metric : state_type → T)
+    (decreasing_proof : termination_metric_decreasing_proof goal search_step termination_metric)
+    (termination_metric' : state_type → T')
+    (decreasing_proof' : termination_metric_decreasing_proof goal search_step termination_metric') :
+    search_recurse priorState search_step termination_metric decreasing_proof
+      = search_recurse priorState search_step termination_metric' decreasing_proof' := by
+  unfold search_recurse;
+  simp +zetaDelta at *;
+  split_ifs;
+  · apply Classical.byContradiction
+    intro h_contra;
+    have h_wf : WellFounded (WellFoundedRelation.rel : T' → T' → Prop) :=
+      WellFoundedRelation.wf
+    exact h_contra <| by
+      have := h_wf.has_min { x | ∃ s : state_type, termination_metric' s = x ∧ search_recurse s search_step termination_metric decreasing_proof ≠ search_recurse s search_step termination_metric' decreasing_proof' } ⟨ _, ⟨ _, rfl, h_contra ⟩ ⟩
+      grind +suggestions
+  · lia
 
 lemma search_recurse_obtain_termination_property
     (priorState : state_type)

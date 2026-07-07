@@ -1577,6 +1577,7 @@ lemma dijkstra_expand_shortest_path_v_new
     rw [add_comm]
   · apply dijkstra_path_head_adj_new_head_is_cheapest <;> try assumption
     · grind
+
 lemma dijkstra_expand_keeps_shortest_path_invar
     (start : V) (goal : V)
     ----- co-invariants needed for path extraction
@@ -1610,8 +1611,10 @@ lemma dijkstra_expand_keeps_shortest_path_invar
     simp at compose v_visited_after not_on_stack_or_head prior_invar ⊢
 
 
+
     -- properties of the current head
     have head_was_visited_before : head ∈ state.visited := by simp_all
+
 
 
     by_cases v_not_start : v ≠ start
@@ -1633,8 +1636,6 @@ lemma dijkstra_expand_keeps_shortest_path_invar
       · next v_now_stack_head =>
         simp at v_now_stack_head
         obtain ⟨ stack_not_empty_after, head_after_is_v ⟩ := v_now_stack_head
-
-
         by_cases v_visited : v ∈ state.visited
         · have mother_options :=
             hsearch_mother_options h_zero state head tail ⟨v, v_visited⟩ v_visited_after_c
@@ -1842,6 +1843,33 @@ theorem dijkstra_is_optimal (start : V) (goal : V)
       unfold WeightedDiGraph.Path.is_cheapest at p_is_cheapest
       specialize p_is_cheapest p'
       simp_all
+
+
+/-! ## Properties of the final Dijkstra search state
+
+These lemmas isolate the facts about the state produced when the stack-based search
+is run to (potential) termination, independently of whether the goal was actually
+found.  They are exactly what is needed by a Dijkstra variant that runs the search
+to exhaustion (see `DijkstraAllNodes.lean`). -/
+
+/-- The full Dijkstra invariant holds for the final search state, for *any* goal.
+This does not depend on the goal being reached; it is the same invariant established
+in the course of `dijkstra_is_optimal`. -/
+lemma dijkstra_last_state_full_invar (start goal : V) :
+    dijkstra_all_invar (g:=g) start (dijkstra_last_state (g:=g) start goal).1 := by
+  have right_class :
+      (fun s => dijkstra_all_invar start (WeightedDiGraph.has_base_search_state.to_base_state (G:=g) s))
+        (dijkstra_last_state (g:=g) start goal).1 := by
+    unfold dijkstra_last_state
+    unfold WeightedDiGraph.search_with_stack_step
+    unfold WeightedDiGraph.search_internal
+    simp
+    apply WeightedDiGraph.search_recurse_lift_base_invariant
+    constructor
+    · apply dijkstra_invar_holds_at_init
+    · apply WeightedDiGraph.base_invar_carries_over_stack_step
+      apply dijkstra_expand_carries_all_dijkstra_invars
+  apply right_class
 
 
 end NatGraph

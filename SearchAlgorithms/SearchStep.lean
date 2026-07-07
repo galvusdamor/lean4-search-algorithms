@@ -259,6 +259,33 @@ def search_exe_with_stack_step
 
     search_exe (start := start) (goal:=goal) (start_state:=start_state) (search_step:=step) (termination_metric := termination_metric) (termination_proof) start_is_base_init base_invars_carry goal_on_stack_if_terminated
 
+/-
+`search_exe_with_stack_step` returns the same path regardless of which termination metric
+(and decreasing proof) is used: the metric only steers the (erased) well-founded recursion.
+This is the workhorse that lets the generator-based algorithms adopt a `nodeNum`-free metric
+without re-deriving soundness/completeness/optimality.
+-/
+theorem search_exe_with_stack_step_metric_irrel
+    {T' : Type} [WellFoundedRelation T']
+    (m : state_type → T) (m' : state_type → T')
+    (mp : termination_proof_for_expand expand goal m)
+    (mp' : termination_proof_for_expand expand goal m')
+    (ic : base_invar_carries_over_expand expand goal (search_invar_all_basic expandable start))
+    (h : (has_base_search_state.to_base_state (G:=G) (D:=D) start_state)
+      = base_search_state_initial start d) :
+    search_exe_with_stack_step (termination_metric := m) expand goal mp ic h
+      = search_exe_with_stack_step (termination_metric := m') expand goal mp' ic h := by
+  unfold search_exe_with_stack_step at *; simp_all +decide [ search_exe ] ;
+  convert rfl;
+  · convert search_recurse_metric_irrel start_state ( WeightedDiGraph.search_stack_step expand ) m ( WeightedDiGraph.search_stack_step_reduces_metric expand goal m mp ) m' ( WeightedDiGraph.search_stack_step_reduces_metric expand goal m' mp' ) using 1;
+    convert rfl;
+    iterate 2 convert search_recurse_metric_irrel start_state ( WeightedDiGraph.search_stack_step expand ) m ( WeightedDiGraph.search_stack_step_reduces_metric expand goal m mp ) m' ( WeightedDiGraph.search_stack_step_reduces_metric expand goal m' mp' ) using 1;
+  · exact WeightedDiGraph.search_recurse_metric_irrel _ _ _ _ _ _;
+  · convert WeightedDiGraph.search_recurse_metric_irrel _ _ _ _ _;
+    all_goals tauto;
+  · convert search_recurse_metric_irrel start_state ( WeightedDiGraph.search_stack_step expand ) m ( search_stack_step_reduces_metric expand goal m mp ) m' ( search_stack_step_reduces_metric expand goal m' mp' ) using 1;
+    convert rfl;
+    iterate 2 convert search_recurse_metric_irrel start_state ( search_stack_step expand ) m _ m' _ using 1
 
 -- function needed for proofs
 def search_with_stack_step

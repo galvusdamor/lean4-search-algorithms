@@ -44,6 +44,14 @@ def List.LexNonZero {α : Type} [Zero α] (n : ℕ) (r : α → α → Prop) (a 
 def Vector.Lex (n : ℕ) (r : α → α → Prop) (as : Vector α n) (bs : Vector α n) : Prop :=
   List.Lex r as.toArray.toList bs.toArray.toList
 
+/-- Decidability of `x ≠ 0` on `WithZero α` for *any* `α`: since `0 = none`, this only
+inspects the outer `Option` constructor and needs no `DecidableEq α`.  Having a concrete
+instance (instead of `Classical.propDecidable`) lets `list_to_finsupp` below be a genuinely
+computable definition. -/
+instance withZeroDecNeZero {α : Type} (x : WithZero α) : Decidable (x ≠ 0) :=
+  match x with
+  | none => isFalse (fun h => h rfl)
+  | some a => isTrue (Option.some_ne_none a)
 -- not needed ... (h : n = l.length)
 private def toFinsuppFin {M : Type} [Zero M] (l : List M) (n : ℕ) [DecidablePred fun i => l.getD (↑i) 0 ≠ 0] : (Fin n) →₀ M where
   toFun i := l.getD i 0
@@ -56,8 +64,7 @@ private def toFinsuppFin {M : Type} [Zero M] (l : List M) (n : ℕ) [DecidablePr
     grind
 
 -- not needed (h : n = l.length)
-open Classical in
-private noncomputable def list_to_finsupp {α : Type} (n : ℕ) (l : List (WithZero α)) : Finsupp (Fin n) (WithZero α) := toFinsuppFin l n
+private def list_to_finsupp {α : Type} (n : ℕ) (l : List (WithZero α)) : Finsupp (Fin n) (WithZero α) := toFinsuppFin l n
 
 
 @[simp, norm_cast]
@@ -74,7 +81,7 @@ theorem List.toFinsuppFin_head {n : ℕ} {M : Type} [Zero M] (a : M) (l : List M
     (toFinsuppFin (a :: l) n) (⟨0, h⟩) = a := rfl
 
 
-private noncomputable def non_zero_list_to_finsupp {α : Type} (n : ℕ) (l : ListNonZero (WithZero α) n) : Finsupp (Fin n) (WithZero α) := list_to_finsupp n l.val --l.prop.2.symm
+private def non_zero_list_to_finsupp {α : Type} (n : ℕ) (l : ListNonZero (WithZero α) n) : Finsupp (Fin n) (WithZero α) := list_to_finsupp n l.val --l.prop.2.symm
 
 
 theorem List.getElem?_after_length {α : Type u} (l : List α) (i : ℕ) (h : l.length ≤ i) :
@@ -534,6 +541,7 @@ instance (n : ℕ) : WellFoundedRelation (Vector (WithTop (ℕ × ℕ)) n) :=
 instance wf_vector_n_with_top (n : ℕ) : WellFoundedRelation (Vector (WithTop (ℕ)) n) :=
   WellFoundedRelation.mk (Vector.Lex n (withTop.lex Nat.lt)) (wf_list n inferInstance)
 
-instance (priority:=high) (n : ℕ) : WellFoundedRelation ((Vector (WithTop (ℕ × ℕ)) n) × ℕ) :=
+instance (priority := high) wf_prod_vector_withTop_nat (n : ℕ) :
+    WellFoundedRelation ((Vector (WithTop (ℕ × ℕ)) n) × ℕ) :=
   WellFoundedRelation.mk (Prod.Lex (Vector.Lex n (withTop.lex (Prod.Lex Nat.lt Nat.lt))) Nat.lt)
       (Prod.instWellFoundedRelation (α := (Vector (WithTop (ℕ × ℕ)) n)) (β := ℕ)).wf
