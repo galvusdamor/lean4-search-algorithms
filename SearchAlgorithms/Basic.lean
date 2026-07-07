@@ -36,6 +36,58 @@ structure WeightedDiGraph (V : Type) (E : Type) [FinEnum V] extends Digraph V wh
   Payload : (u : V) -> (v : V) -> (Adj u v) -> E
   instDecAdj : DecidableRel Adj
 
+/-- A weighted digraph equipped with an *adjacency generator*.
+
+Besides the data of a `WeightedDiGraph`, it stores for every vertex `u` an explicit
+list `neighbours u` of its out-neighbours, together with a proof `neighbours_are_adj`
+that this list is correct (`Adj u v` holds iff `v` occurs in `neighbours u`).
+
+The purpose of the generator is efficiency: a search algorithm can expand a vertex by
+iterating over `neighbours u` directly, instead of enumerating *all* vertices of the
+graph and filtering them by the adjacency relation.
+
+The last field, `neighbours_sublist`, records that every neighbour list follows the
+ambient `FinEnum` enumeration order (it is an ordered sublist of
+`FinEnum.toList Finset.univ`).  This assumption is deliberately mild — it is satisfied
+by the canonical generator `fun u => (FinEnum.toList Finset.univ).filter (Adj u ·)` via
+`List.filter_sublist` — and it is only used to prove that a single expansion step of the
+generator-based search produces *exactly* the same search state (including the
+order-sensitive priority queue) as the enumeration-based search. -/
+structure WeightedDiGraphWithGenerator (V : Type) (E : Type) [FinEnum V]
+    extends WeightedDiGraph V E where
+  /-- The list of out-neighbours of a vertex. -/
+  neighbours : V → List V
+  /-- `neighbours` is a correct adjacency generator. -/
+  neighbours_are_adj : ∀ u v : V, toWeightedDiGraph.Adj u v ↔ v ∈ neighbours u
+  /-- Each neighbour list is an ordered sublist of the `FinEnum` enumeration of `V`. -/
+  neighbours_sublist : ∀ u : V,
+    (neighbours u).Sublist (FinEnum.toList (Finset.univ : Finset V))
+
+/-- Every vertex occurs in the (coerced) `FinEnum` enumeration of all vertices. -/
+theorem WeightedDiGraph.mem_coe_toList_univ {V : Type} [FinEnum V] (v : V) :
+    v ∈ (FinEnum.toList (Finset.univ : Finset V) : List V) := by
+  change v ∈ List.flatMap _ _
+  rw [List.mem_flatMap]
+  exact ⟨⟨v, Finset.mem_univ v⟩, FinEnum.mem_toList _, by simp⟩
+
+/-- The canonical adjacency generator of any `WeightedDiGraph`: for each vertex `u`, take the
+list of *all* vertices (in `FinEnum` order) and filter it by the decidable adjacency relation.
+
+This witnesses that the `WeightedDiGraphWithGenerator` interface is always inhabited, and in
+particular that its `neighbours_sublist` field is easy to satisfy (`List.filter_sublist`).  A
+generator obtained this way still enumerates all vertices, so it defeats the efficiency purpose;
+it exists only to show the interface is well-formed.  Genuinely efficient instances supply a
+bespoke `neighbours` function. -/
+def WeightedDiGraph.toWithGenerator {V E : Type} [FinEnum V]
+    (G : WeightedDiGraph V E) : WeightedDiGraphWithGenerator V E where
+  toWeightedDiGraph := G
+  neighbours u :=
+    ((FinEnum.toList (Finset.univ : Finset V) : List V)).filter
+      (fun v => @decide (G.Adj u v) (G.instDecAdj u v))
+  neighbours_are_adj u v := by
+    simp only [List.mem_filter, decide_eq_true_eq]
+    exact ⟨fun h => ⟨WeightedDiGraph.mem_coe_toList_univ v, h⟩, fun h => h.2⟩
+  neighbours_sublist u := List.filter_sublist
 -- def local global variable for a graph
 variable {V : Type} {E : Type} [FinEnum V] --[DecidableEq V] [DecidableEq E]
 variable {G : WeightedDiGraph V E}
