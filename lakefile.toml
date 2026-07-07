@@ -5,6 +5,13 @@ defaultTargets = ["SearchAlgorithms"]
 [[lean_lib]]
 name = "SearchAlgorithms"
 
+[[lean_lib]]
+name = "BenchAux"
+
+[[lean_exe]]
+name = "bench"
+root = "Bench"
+
 [[require]]
 name = "mathlib"
 scope = "leanprover-community"
