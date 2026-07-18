@@ -37,10 +37,10 @@ theorem pairwise_add_anywhere {α: Type} {pr: α → α → Prop} {l1 l2 : List 
           have ⟨ all_condition, rest_list⟩ := rest_of_list
           apply all_condition
           cases cond
-          case a.inl apinls =>
+          case inl apinls =>
             left
             exact apinls
-          case a.inr some_or =>
+          case inr some_or =>
           cases some_or
           case inl apisa =>
             contradiction
@@ -152,7 +152,7 @@ theorem maximum_of_non_empty_le (l : List Nat) (non_empty : l ≠ []) :
     intro x x_in_l
     unfold maximum_of_non_empty_list
     simp_all
-    apply List.le_max?_get_of_mem
+    apply List.le_max_of_mem 
     use x_in_l
 
 theorem Option.eq_some_if_get_eq {α : Type u_1} {o : Option α} {a : α} :
