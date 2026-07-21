@@ -916,11 +916,12 @@ lemma dijkstra_path_head_adj_new_head_is_cheapest {start : V}
       -- p' must be cheaper than the cost of path_to_v -- which is path_to_head.cost + e (by construction)
       -- Eq 1: by expand p'_is_cheaper
       have su_lt_sh_e : p'.cost < path_to_head.cost + e := by
-        unfold Path.cost
-        convert p'_is_cheaper
-        unfold Path.concat
-        simp_all only [Walk.start_in_support, search_invar_stack_is_visited, List.mem_cons, forall_eq_or_imp, true_and,search_invar_on_stack_or_all_neighbours_visited, Subtype.forall, not_or, and_imp, Walk.goal_in_support,Path.cost_same, ne_eq, Path.support, «Prop».bot_eq_false, imp_false, not_and, not_forall, decide_not, Bool.decide_and, List.all_eq_true, Bool.and_eq_true, Bool.not_eq_eq_eq_not, Bool.not_true,decide_eq_false_iff_not, Walk.concat_inc_cost_by_edge]
-        rw [add_comm]
+        have hc := Walk.concat_inc_cost_by_edge path_to_head.val adj_head_v
+        change p'.val.cost < path_to_head.val.cost + e
+        change p'.val.cost < (path_to_head.concat adj_head_v v_not_in_support_ph).val.cost at p'_is_cheaper
+        unfold Path.concat at p'_is_cheaper
+        rw [hc] at p'_is_cheaper
+        omega
       -- we set the pathCost of v to exactly this value
       have v_after_eq_e_sh: ((hsearch_step_expand h_zero state head tail).pathOrder v).1 = e + path_to_head.cost := by
         unfold hsearch_step_expand
@@ -975,15 +976,16 @@ lemma dijkstra_path_head_adj_new_head_is_cheapest {start : V}
             simp
             grind
           ·
+            have hc := Walk.concat_inc_cost_by_edge path_to_head.val adj_head_v
+            change (path_to_head.concat adj_head_v v_not_in_support_ph).val.cost ≤ _
             unfold Path.concat
-            simp only [Walk.concat_inc_cost_by_edge]
+            rw [hc]
             unfold e Path.cost at v_after_eq_e_sh
-            apply le_of_eq
-            exact v_after_eq_e_sh.symm
+            omega
       · next h =>
         have v_visited := h.left
-        specialize path_explored_contra p'
-        simp_all
+        apply path_explored_contra p'
+        exact ⟨p'_is_cheaper, v_visited, h.right⟩
 
 
 
@@ -1104,8 +1106,12 @@ lemma dijkstra_path_mother_adj_new_head_is_cheapest {start : V}
       · next h =>
         -- path is completely explored, so we have the update invar along it
         have v_visited := h.left
-        specialize path_explored_contra p'
-        simp_all
+        apply path_explored_contra p'
+        refine ⟨?_, v_visited, h.right⟩
+        change p'.cost < (path_mother.concat adj_mother_v v_not_in_mother_path).cost
+        change p'.cost < path_mother_v.cost at p'_cheaper
+        rw [← path_mother_v_is]
+        exact p'_cheaper
 
 
 /-- Auxiliary fact for `dijkstra_expand_keeps_shortest_path_invar`: in the case where a
@@ -1203,7 +1209,9 @@ lemma dijkstra_expand_shortest_path_mother_is_head
     unfold search_invar_mother_decreasing_path_order at decreasing_invar
     specialize decreasing_invar ⟨ v, v_visited ⟩ v_not_start
     simp_all
-    apply FValueComp.lt_irr (state.pathOrder v) decreasing_invar
+    have hdec := decreasing_invar ⟨v, v_visited⟩ v_not_start
+    rw [mother_is_head] at hdec
+    exact FValueComp.lt_irr (state.pathOrder v) hdec
 
   let e := edgeCost adj_head_v
   have v_order_eq_head_plus_edge : ((hsearch_step_expand h_zero state head tail).pathOrder v).1 = ((hsearch_step_expand h_zero state head tail).pathOrder head).1 + e := by
@@ -1435,16 +1443,13 @@ lemma dijkstra_expand_shortest_path_mother_same
       apply le_trans
       · apply update_invar
       · apply add_le_add_left
-        unfold dijkstra_stack_shortest_path at prior_invar
-        specialize prior_invar the_mother
-        simp_all
-        unfold cost_is at prior_invar
-        obtain ⟨ p, p_cost, is_cheapest ⟩ := prior_invar
+        have prior_invar' := prior_invar the_mother mother_visited (Or.inl mother_not_on_stack)
+        unfold cost_is at prior_invar'
+        obtain ⟨ p, p_cost, is_cheapest ⟩ := prior_invar'
         unfold Path.is_cheapest at is_cheapest
-        specialize is_cheapest path_mother
-        unfold Path.cost at is_cheapest p_cost
-        convert is_cheapest
-        exact p_cost.symm
+        have hc := is_cheapest path_mother
+        rw [p_cost] at hc
+        exact hc
   · unfold Path.is_cheapest
     intro p'
     by_contra p'_cheaper; simp at p'_cheaper
@@ -1620,21 +1625,29 @@ lemma dijkstra_expand_keeps_shortest_path_invar
     by_cases v_not_start : v ≠ start
     · cases not_on_stack_or_head
       · next v_not_on_stack =>
-        clear prior_invar_c compose_c v_visited_after_c
+        have v_not_on_stack_c := v_not_on_stack
+        clear v_visited_after_c
         specialize prior_invar v
         unfold hsearch_step_expand at v_not_on_stack v_visited_after ⊢
         simp at v_visited_after
         cases v_visited_after
         · next v_was_visited =>
           simp_all
-          have invar_taut : ¬v = head ∨ head = v := by grind
-          specialize prior_invar invar_taut
+          have hold : v ∉ state.stack ∨
+              (if ne : state.stack ≠ [] then state.stack.head ne = v else false = true) := by
+            by_cases hvh : v = head
+            · right
+              simp [compose_c, hvh]
+            · left
+              rw [compose_c]
+              simp [hvh]
+              exact v_not_on_stack.1
+          specialize prior_invar_c v v_was_visited hold
           grind
         · next both =>
           obtain ⟨ head_adj_v, v_was_not_visited ⟩ := both
           simp_all -- contractiction. This case is impossible
       · next v_now_stack_head =>
-        simp at v_now_stack_head
         obtain ⟨ stack_not_empty_after, head_after_is_v ⟩ := v_now_stack_head
         by_cases v_visited : v ∈ state.visited
         · have mother_options :=

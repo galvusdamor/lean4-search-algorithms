@@ -4,6 +4,28 @@ import Mathlib.Data.Multiset.Defs
 
 variable {V : Type} [FinEnum V] [DecidableEq V]
 
+/-- Compatibility copy of the pre-4.31 subtype enumeration construction.  Mathlib 4.31
+marks the corresponding constructors as `implicit_reducible`, which prevents the existing
+proofs from unfolding the concrete enumeration. -/
+@[reducible] def FinEnum.ofNodupListCompat {α : Type} [DecidableEq α] (xs : List α)
+    (h : ∀ x : α, x ∈ xs) (h' : List.Nodup xs) : FinEnum α where
+  card := xs.length
+  equiv :=
+    ⟨fun x => ⟨xs.idxOf x, by rw [List.idxOf_lt_length_iff]; apply h⟩, xs.get,
+      fun x => by simp, fun i => by ext; simp [h'.idxOf_getElem]⟩
+
+/-- Compatibility copy of `FinEnum.ofList` with ordinary reducibility. -/
+@[reducible] def FinEnum.ofListCompat {α : Type} [DecidableEq α] (xs : List α)
+    (h : ∀ x : α, x ∈ xs) : FinEnum α :=
+  FinEnum.ofNodupListCompat xs.dedup (by simp [*]) (List.nodup_dedup _)
+
+/-- Compatibility copy of the pre-4.31 subtype enumeration instance. -/
+@[reducible] def FinEnum.subtypeCompat {α : Type} [FinEnum α]
+    (p : α → Prop) [DecidablePred p] : FinEnum {x // p x} :=
+  FinEnum.ofListCompat
+    ((FinEnum.toList α).filterMap fun x => if h : p x then some ⟨x, h⟩ else none)
+    (by rintro ⟨x, h⟩; simpa)
+
 /-- currently unused. Proof needed to be inlined `in maximum_path_order_of`. -/
 theorem FinEnum.empty_to_list_empty_set (states : Finset V):
       (FinEnum.toList { x // x ∈ states }).unattach = [] → states = ∅ := by

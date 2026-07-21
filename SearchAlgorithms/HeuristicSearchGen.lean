@@ -44,8 +44,9 @@ list as filtering `s` by `p`.  (Both `filter`s keep the elements in their origin
 theorem filter_eq_of_sublist_of_mem {α : Type} (p : α → Bool) {s l : List α}
     (hsub : s.Sublist l) (hnodup : l.Nodup) (hmem : ∀ x ∈ l, p x → x ∈ s) :
     l.filter p = s.filter p := by
-  rw [ eq_comm ] ; induction' hsub with x l hsub ih ; simp_all +decide ;
-  · grind +suggestions;
+  induction' hsub with a b hsub ih
+  · rfl
+  · grind
   · grind
 
 /-- `filterMap`-ing an `attach`ed list with a predicate whose `some`/`none` choice does not
@@ -263,11 +264,21 @@ theorem hsearch_gen_stack
   convert rfl
   · ext; simp +decide [hP, Finset.mem_filterMap]
     congr! 2
-    induction ‹List V› <;> simp +decide [*, List.filterMap_cons]
-    split_ifs <;> simp +decide [*, List.filter_cons]; all_goals grind
-  · convert G.neighbours_sublist stackHead
-  · simp +decide
-    exact List.Nodup.map Subtype.val_injective FinEnum.nodup_toList
+    change List.filterMap _ (FinEnum.toList (Finset.univ : Finset V)).unattach =
+      List.filter _ (FinEnum.toList (Finset.univ : Finset V)).unattach
+    generalize (FinEnum.toList (Finset.univ : Finset V)).unattach = enum
+    induction enum <;> simp +decide [*, List.filterMap_cons]
+    split_ifs <;> simp +decide [*]
+  · have hunattach : (FinEnum.toList (Finset.univ : Finset V)).unattach = (do
+        let a ← FinEnum.toList (Finset.univ : Finset V)
+        pure a.1) := by
+      unfold List.unattach
+      change List.map (fun a : {v : V // v ∈ (Finset.univ : Finset V)} => a.1) _ =
+        List.flatMap (fun a : {v : V // v ∈ (Finset.univ : Finset V)} => [a.1]) _
+      exact List.map_eq_flatMap
+    rw [hunattach]
+    exact G.neighbours_sublist stackHead
+  · exact List.Nodup.map Subtype.val_injective FinEnum.nodup_toList
   · intro v _ hPv
     simp only [hP] at hPv
     by_cases hadj : (G.toWeightedDiGraph).Adj stackHead v

@@ -32,19 +32,25 @@ open WeightedDiGraph
 
 variable {V : Type} [FinEnum V]
 
+-- Mathlib 4.31 made the standard subtype enumeration `implicit_reducible`.  Keep the
+-- pre-4.31 concrete instance locally so the existing enumeration proofs remain unchanged.
+local instance (priority := high) subtypeFinEnumCompat {α : Type} [FinEnum α]
+    (p : α → Prop) [DecidablePred p] : FinEnum {x // p x} := FinEnum.subtypeCompat p
 /-
 The coerced enumeration of `↥(Finset.univ)` (as it appears in `neighbours_sublist`) is the
 type-level `FinEnum` enumeration.
 -/
 theorem coe_toList_univ_eq (β : Type) [FinEnum β] :
     (FinEnum.toList (@Finset.univ β FinEnum.instFintype) : List β) = FinEnum.toList β := by
-  simp +decide [ FinEnum.toList ]
-  simp +decide [ FinEnum.Subtype.finEnum, FinEnum.ofList ]
-  simp +decide [ FinEnum.ofNodupList ]
-  rw [ List.dedup_eq_self.mpr ]
+  simp only [FinEnum.toList]
+  unfold subtypeFinEnumCompat FinEnum.subtypeCompat FinEnum.ofListCompat
+    FinEnum.ofNodupListCompat
+  simp +decide
+  rw [List.dedup_eq_self.mpr]
   · rw [List.unattach, List.map_map]
     exact List.map_id'' (fun _ => rfl) _
-  · exact List.Nodup.map ( fun x y h => by simpa using congr_arg Subtype.val h ) ( FinEnum.nodup_toList )
+  · exact List.Nodup.map
+      (fun x y h => by simpa using congr_arg Subtype.val h) FinEnum.nodup_toList
 
 /-
 The type-level `FinEnum` enumeration of `Option V` lists `none` last: it is the
@@ -53,7 +59,8 @@ enumeration of `V` mapped through `some`, with `none` appended at the end.
 theorem toList_option_eq :
     FinEnum.toList (Option V) = (FinEnum.toList V).map some ++ [none] := by
   -- By definition of `FinEnum` for `Option V`, the list is the enumeration of `V` with `none` appended.
-  simp [FinEnum.toList]
+  simp only [FinEnum.toList]
+  unfold instFinEnumOption_searchAlgorithms FinEnum.instFinEnumOptionLast FinEnum.insertNone
   have h_finRange_succ : List.finRange (FinEnum.card V + 1) = List.map (Fin.castSucc) (List.finRange (FinEnum.card V)) ++ [Fin.last (FinEnum.card V)] := by
     refine' List.ext_get _ _ <;> simp +decide
     grind +splitImp
@@ -93,12 +100,16 @@ theorem augNeighbours_sublist (G : NatGraphWithGenerator V) (is_goal : V → Pro
     [DecidablePred is_goal] (a : Option V) :
     (augNeighbours G is_goal a).Sublist
       (FinEnum.toList (@Finset.univ (Option V) FinEnum.instFintype)) := by
-  cases a;
-  · exact List.nil_sublist _;
-  · convert List.Sublist.append _ _;
-    convert toList_univ_option_eq;
-    · convert List.Sublist.map _ ( G.neighbours_sublist ‹_› ) using 1;
-    · split_ifs <;> simp +decide
+  cases a with
+  | none => exact List.nil_sublist _
+  | some u =>
+      rw [toList_univ_option_eq]
+      unfold augNeighbours
+      apply List.Sublist.append
+      · exact List.Sublist.map some (G.neighbours_sublist u)
+      · split_ifs
+        · exact List.Sublist.refl [none]
+        · exact List.nil_sublist [none]
 
 /-- The artificial-goal augmentation of a *generator* graph for a goal predicate `is_goal`.
 
@@ -181,6 +192,7 @@ theorem astar_multigoal_gen_eq (G : NatGraphWithGenerator V) (heur : V → ℕ�
   rw [astar_multigoal_aux_eq_postprocess]
   unfold astar_multigoal_gen
   rw [astar_gen_eq]
+  rfl
 
 theorem astar_multigoal_gen_is_sound (G : NatGraphWithGenerator V) (heur : V → ℕ∞) (start : V)
     (is_goal : V → Prop) [DecidablePred is_goal] :
@@ -243,6 +255,6 @@ theorem dijkstra_multigoal_gen_is_optimal (G : NatGraphWithGenerator V) (start :
     (returned_path : Option.isSome (dijkstra_multigoal_gen G start is_goal)) :
     ((dijkstra_multigoal_gen G start is_goal).get returned_path).2.is_cheapest :=
   astar_multigoal_gen_is_optimal G h_zero start is_goal
-    (fun _ _ _ _ => by simp only [h_zero]; exact zero_le _) returned_path
+    (fun _ _ _ _ => by simp only [h_zero]; exact zero_le) returned_path
 
 end NatGraph

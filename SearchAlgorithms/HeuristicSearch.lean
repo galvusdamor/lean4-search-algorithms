@@ -682,7 +682,11 @@ lemma hsearch_expand_metric_reduction_nat :
           unfold hsearch_step_expand at h_cost_fst_eq; simp_all +decide [ Finset.subset_iff ] ;
           grind;
         simp_all +decide [ WellFoundedRelation.rel ];
-        exact Prod.Lex.right _ ( Prod.Lex.right _ ( Prod.Lex.right _ ( by simpa using h_newly_visited_empty ) ) );
+        have h_stack : InvImage (fun x y : Nat => x < y) sizeOf
+            (hsearch_step_expand heur state head tail).stack.length state.stack.length := by
+          change (hsearch_step_expand heur state head tail).stack.length < state.stack.length
+          exact h_newly_visited_empty
+        exact Prod.Lex.right _ ( Prod.Lex.right _ ( Prod.Lex.right _ h_stack ) );
       · simp_all +decide [ WellFoundedRelation.rel ];
         refine' Prod.Lex.right _ _;
         refine' Prod.Lex.right _ _;

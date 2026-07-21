@@ -569,13 +569,15 @@ lemma translate_walk_cost_eq {is_goal : V → Prop} [DecidablePred is_goal] {b :
     ∀ {a : V} (w : (G.add_artificial_goal is_goal).Walk (some a) (some b))
     (none_not_in : Option.none ∉ w.support),
     (NatGraph.translate_walk (G:=G) w none_not_in).cost = w.cost
-  | _, .nil, _ => by simp [NatGraph.translate_walk, WeightedDiGraph.Walk.cost]
+  | _, .nil, _ => by
+    simp only [NatGraph.translate_walk, WeightedDiGraph.Walk.cost]
   | a, .cons (w := some mid') adj rest, none_not_in => by
-    simp only [NatGraph.translate_walk, WeightedDiGraph.Walk.cost, NatGraph.edgeCost, NatGraph.add_artificial_goal]
-    simp only [Nat.add_left_cancel_iff]
-    exact translate_walk_cost_eq rest _
-  | a, .cons (w := none) adj _, none_not_in => by
-    exfalso; apply none_not_in; simp [WeightedDiGraph.Walk.support]
+    unfold NatGraph.translate_walk
+    simp only []
+    unfold WeightedDiGraph.Walk.cost
+    exact congrArg (NatGraph.edgeCost adj + ·) (translate_walk_cost_eq rest _)
+  | a, .cons (w := none) adj rest, none_not_in => by
+    exact False.elim (none_not_in (by simp [WeightedDiGraph.Walk.support]))
 
 /-
 PROBLEM
@@ -623,7 +625,7 @@ lemma lift_path_to_augmented_cost {is_goal : V → Prop} [DecidablePred is_goal]
         exact q.concat thegoal_is_goal
         · simp_all [ List.nodup_append ]
           intro a ha H
-          have := hq₁; simp_all [ List.nodup_iff_count_le_one ] 
+          have := hq₁; simp_all [ List.nodup_iff_count_le_one ]
           exact absurd ha ( none_not_in_walk_to_some q )
         · simp [ WeightedDiGraph.Walk.concat ]
           rfl
@@ -667,21 +669,26 @@ for original nodes `start` and `v`, the cheapest cost in the augmented graph bet
 -/
 lemma augmented_cost_is_some {is_goal : V → Prop} [DecidablePred is_goal] {start v : V} {d : ℕ} :
     (G.add_artificial_goal is_goal).cost_is (some start) (some v) d ↔ G.cost_is start v d := by
-  constructor <;> intro h
-  · obtain ⟨ p, hp ⟩ := h
-    use ⟨ G.translate_walk p.val (none_not_in_walk_to_some p.val), G.translate_walk_nodup p.val p.prop (none_not_in_walk_to_some p.val) ⟩, by
-      convert hp.1 using 1
-      convert NatGraph.translate_path_cost p ( none_not_in_walk_to_some p.val ) using 1
-    intro q
-    convert hp.2 ( G.lift_path_to_augmented ( is_goal:=is_goal ) q ) using 1
-    · convert NatGraph.translate_path_cost p ( none_not_in_walk_to_some p.val ) using 1
-    · exact Eq.symm (lift_path_to_augmented_cost_eq q)
-  · obtain ⟨ p, hp ⟩ := h
-    refine' ⟨ NatGraph.lift_path_to_augmented p, _, _ ⟩ <;> simp_all
-    · exact hp.1 ▸ NatGraph.lift_path_to_augmented_cost_eq p
+  constructor
+  · rintro ⟨p, hp_cost, hp_cheapest⟩
+    let tp := translate_path p (none_not_in_walk_to_some p.val)
+    refine ⟨tp, ?_, ?_⟩
+    · exact (translate_path_cost p (none_not_in_walk_to_some p.val)).trans hp_cost
     · intro q
-      convert hp.2 ( NatGraph.translate_path q ( none_not_in_walk_to_some q.val ) ) using 1
-      · exact lift_path_to_augmented_cost_eq p
-      · exact Eq.symm ( NatGraph.translate_path_cost q ( none_not_in_walk_to_some q.val ) )
+      calc
+        tp.cost = p.cost := translate_path_cost p (none_not_in_walk_to_some p.val)
+        _ ≤ (lift_path_to_augmented (is_goal := is_goal) q).cost :=
+          hp_cheapest (lift_path_to_augmented (is_goal := is_goal) q)
+        _ = q.cost := lift_path_to_augmented_cost_eq q
+  · rintro ⟨p, hp_cost, hp_cheapest⟩
+    refine ⟨lift_path_to_augmented (is_goal := is_goal) p, ?_, ?_⟩
+    · exact (lift_path_to_augmented_cost_eq p).trans hp_cost
+    · intro q
+      let tq := translate_path q (none_not_in_walk_to_some q.val)
+      calc
+        (lift_path_to_augmented (is_goal := is_goal) p).cost = p.cost :=
+          lift_path_to_augmented_cost_eq p
+        _ ≤ tq.cost := hp_cheapest tq
+        _ = q.cost := translate_path_cost q (none_not_in_walk_to_some q.val)
 
 end NatGraph

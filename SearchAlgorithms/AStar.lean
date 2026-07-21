@@ -383,10 +383,8 @@ lemma optimal_cost_le_pathOrder
   have h_extracted_cost_le_path_order : (WeightedDiGraph.extract_path_to start v state hv mother_invar mother_adj decreasing).1.cost ≤ (state.pathOrder v).1 :=
     hsearch_path_extracted_not_longer_than_path_order start state mother_invar mother_adj decreasing diff_invar v hv
   obtain ⟨ w, hw₁, hw₂ ⟩ := hd
-  contrapose! h_extracted_cost_le_path_order
-  refine lt_of_lt_of_le h_extracted_cost_le_path_order ?_
-  convert hw₂ _
-  exact hw₁.symm
+  have h_min := hw₂ (WeightedDiGraph.extract_path_to start v state hv mother_invar mother_adj decreasing).1
+  omega
 
 
 /-

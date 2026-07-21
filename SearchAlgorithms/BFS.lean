@@ -870,7 +870,6 @@ lemma bfs_expand_keeps_shortest_path_invar
           obtain ⟨ head_adj_v, v_was_not_visited ⟩ := both
           simp_all -- contractiction. This case is impossible
       · next v_now_stack_head =>
-        simp at v_now_stack_head
         obtain ⟨ stack_not_empty_after, head_after_is_v ⟩ := v_now_stack_head
         unfold bfs_step_expand at stack_not_empty_after head_after_is_v v_visited ⊢
         simp at v_visited
@@ -990,7 +989,6 @@ lemma bfs_expand_keeps_shortest_path_invar
               unfold distance_is at w_dist_is_order
               obtain ⟨shortest_to_w, ⟨w_len,is_shortest⟩ ⟩ := w_dist_is_order
               unfold Path.is_shortest at is_shortest
-              simp at w_nei_updated
               rw [←w_len] at w_nei_updated
               have path_to_v_has_order_length := extract_length_invar mother_invar mother_invar_adj decreasing_invar v v_was_visited_before
               unfold path_to_v at p'_is_shorter
