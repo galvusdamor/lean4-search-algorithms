@@ -180,6 +180,7 @@ vertices — making it fast on very large graphs with short paths. -/
 def astar_multigoal_gen (G : NatGraphWithGenerator V) (heur : V → ℕ∞) (start : V)
     (is_goal : V → Prop) [DecidablePred is_goal] :
     Option ((thegoal : {v : V // is_goal v}) × (G.toWeightedDiGraph).Path start thegoal) :=
+  dbg_trace "Starting 2 " ;
   astar_multigoal_postprocess (g := G.toWeightedDiGraph) start is_goal
     (astar_gen (add_artificial_goal_gen G is_goal) (opt_heur heur) (some start) none)
 

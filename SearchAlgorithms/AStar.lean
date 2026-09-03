@@ -1,5 +1,5 @@
 import SearchAlgorithms.HeuristicSearch
-import Mathlib
+import Mathlib.Tactic
 
 -- def local global variable for a graph
 variable {V : Type} [FinEnum V]

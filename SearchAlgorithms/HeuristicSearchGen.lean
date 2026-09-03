@@ -1,5 +1,5 @@
 import SearchAlgorithms.HeuristicSearch
-import Mathlib
+import Mathlib.Tactic
 
 /-!
 # Generator-based heuristic search
@@ -117,6 +117,7 @@ def hsearch_step_expand_gen
     (stackHead : V)
     (stackTail : List V) :
     hsearch_search_state G.toWeightedDiGraph :=
+  dbg_trace "Expand stack size is {stackTail.length} {priorState.visited.card}" ; 
   let g : NatGraph V := G.toWeightedDiGraph
   -- The newly-visited neighbours.  Because we iterate over `G.neighbours stackHead`,
   -- every candidate is *known* to be adjacent to `stackHead` — the required adjacency
@@ -285,7 +286,7 @@ theorem hsearch_gen_stack
     · exact (G.neighbours_are_adj stackHead v).mp hadj
     · simp [hadj] at hPv
 
-/-
+/--
 The `mother` functions agree pointwise.
 -/
 theorem hsearch_gen_mother
@@ -296,7 +297,9 @@ theorem hsearch_gen_mother
     (h2 : x ∈ (hsearch_step_expand (g := G.toWeightedDiGraph) heur priorState stackHead stackTail).visited) :
     (hsearch_step_expand_gen G heur priorState stackHead stackTail).mother ⟨x, h1⟩
       = (hsearch_step_expand (g := G.toWeightedDiGraph) heur priorState stackHead stackTail).mother ⟨x, h2⟩ := by
-  by_cases hx : x ∉ priorState.visited <;> simp_all +decide [ hsearch_step_expand_gen, hsearch_step_expand ]
+  -- Both `mother` functions are the *same* term: the (proof-irrelevant) membership proof is
+  -- the only difference, and the `dbg_trace` in the generator step unfolds definitionally.
+  rfl
 
 /-!
 ## Equivalence of one expansion step
