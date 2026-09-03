@@ -1,5 +1,10 @@
 import SearchAlgorithms.DijkstraGen
+import SearchAlgorithms.DijkstraMap
 import SearchAlgorithms.MultigoalGen
+import SearchAlgorithms.MultigoalMap
+import SearchAlgorithms.DijkstraFast
+import SearchAlgorithms.DijkstraSorted
+import SearchAlgorithms.MultigoalFast
 import BenchAux
 
 /-!
@@ -249,7 +254,169 @@ def multiGoalScaling : IO Unit := do
   timeMultiGen "|V|=1000000"   1000000   (by norm_num) 100
   timeMultiGen "|V|=100000000" 100000000 (by norm_num) 100
 
-def main : IO Unit := do
+/-- Time one *flattened* (hash-map state) search and one generator search on the
+non-branching path graph `Fin n` from vertex `0` down to `depth`, and print both times.
+
+`n` is a run-time argument on purpose (see `timePathGen`): a closed search expression would be
+evaluated at module initialisation instead of inside `main`. -/
+def timePathGenVsMap (n : Nat) (hn : 0 < n) (depth : Nat) : IO Unit := do
+  let t0 ← IO.monoNanosNow
+  let rg := foundPath (dijkstra_gen (pathGraph n) ⟨0, hn⟩ ⟨depth % n, Nat.mod_lt _ hn⟩)
+  let t1 ← IO.monoNanosNow
+  let rm := foundPath (dijkstra_map (pathGraph n) ⟨0, hn⟩ ⟨depth % n, Nat.mod_lt _ hn⟩)
+  let t2 ← IO.monoNanosNow
+  IO.println s!"  depth={depth}: gen found={rg}, {(t1 - t0) / 1000} µs   map found={rm}, {(t2 - t1) / 1000} µs"
+  (← IO.getStdout).flush
+
+/-- Experiment 5: closure-based state (`dijkstra_gen`) versus flattened, hash-map based state
+(`dijkstra_map`) on a non-branching path, with the goal moving further and further away, i.e.
+with a growing **number of expansions**.
+
+This is the regime in which the closure-based state degrades: after `k` expansions its
+`pathOrder`/`mother` are a chain of `k` nested closures, so every lookup costs `Θ(k)` and one
+expansion (which performs many lookups) costs `Θ(k · queue)`.  The flattened state of
+`SearchAlgorithms.HeuristicSearchMap` replaces those chains by hash maps, so a lookup is `O(1)`
+and the per-expansion cost no longer grows with the number of steps already performed.
+
+Both columns compute the same path — `dijkstra_map_eq_gen` is a theorem.
+
+Measured (one machine, one run):
+
+| goal depth | `dijkstra_gen` | `dijkstra_map` |
+|-----------:|---------------:|---------------:|
+|         20 |         1.3 ms |         1.5 ms |
+|         40 |          12 ms |         1.9 ms |
+|         80 |         100 ms |          12 ms |
+|        160 |         960 ms |          34 ms |
+|        320 |        12 400 ms |        242 ms | -/
+def flattenedStateScaling : IO Unit := do
+  IO.println "== Experiment 5: closure state (gen) vs flattened hash-map state (map) =="
+  IO.println "   (non-branching path, |V| = 4096, goal depth = number of expansions)"
+  timePathGenVsMap 4096 (by norm_num) 20
+  timePathGenVsMap 4096 (by norm_num) 40
+  timePathGenVsMap 4096 (by norm_num) 80
+  timePathGenVsMap 4096 (by norm_num) 160
+  timePathGenVsMap 4096 (by norm_num) 320
+
+/-! ### Experiment 6: per-expansion wall-clock time
+
+The verified search is a *pure* function, so it cannot read the system clock itself (that
+would need `unsafe` code).  Instead the driver below runs the search **one expansion at a
+time** — using the very same verified `WeightedDiGraph.search_stack_step` and expansion
+functions that `dijkstra_gen` / `dijkstra_map` iterate internally — and takes a timestamp
+around each step.  Printing the elapsed time per expansion in `IO` is the honest analogue of
+putting a clock into the `dbg_trace` of the expansion function.
+
+After every step the driver also *forces* one path-order lookup per visited node (the
+`checksum` below).  This is necessary for the measurement to be meaningful: building a closure
+is cheap, evaluating the resulting chain of closures is not, and Lean's evaluation is
+otherwise happy to postpone that cost until some later step (or until the path is extracted).
+The same `checksum` on the flattened state is just one hash-map lookup per visited node.
+-/
+
+/-- The first `k` vertices of `Fin n` — on the path graph these are exactly the vertices
+visited after `k - 1` expansions. -/
+def firstVerts (n k : ℕ) : List (Fin n) :=
+  (List.range k).filterMap (fun m => if h : m < n then some (⟨m, h⟩ : Fin n) else none)
+
+/-- Force one path-order lookup for each of the given nodes and return their sum. -/
+def checksum {n : ℕ} {g : NatGraph (Fin n)} (bs : hsearch_search_state g) (l : List (Fin n)) :
+    ℕ :=
+  l.foldl (fun acc v => acc + (bs.pathOrder v).1) 0
+
+/-- Run at most `maxSteps` expansions of the *flattened* (hash-map state) search on the path
+graph `Fin n` towards `goal`, printing the wall-clock time of every single expansion. -/
+def stepTimesMap (n : Nat) (hn : 0 < n) (goal : Nat) (maxSteps : Nat) : IO Unit := do
+  let G := pathGraph n
+  let gv : Fin n := ⟨goal % n, Nat.mod_lt _ hn⟩
+  let mut s : hsearch_map_state (Fin n) := hsearch_map_state.initial ⟨0, hn⟩ (0, 0)
+  let mut t ← IO.monoNanosNow
+  for i in [0:maxSteps] do
+    let r := WeightedDiGraph.search_stack_step (G := G.toWeightedDiGraph) (D := ℕ × ℕ)
+      (hsearch_step_expand_map G h_zero) gv s
+    s := r.1
+    let c := checksum (s.toBaseG G) (firstVerts n (i + 2))
+    let t1 ← IO.monoNanosNow
+    IO.println s!"  map step {i}: visited={s.visited.card}, checksum={c}, {(t1 - t) / 1000} µs"
+    (← IO.getStdout).flush
+    t := t1
+    if r.2.isSome then break
+
+/-- Run at most `maxSteps` expansions of the *closure-based* (generator) search on the path
+graph `Fin n` towards `goal`, printing the wall-clock time of every single expansion. -/
+def stepTimesGen (n : Nat) (hn : 0 < n) (goal : Nat) (maxSteps : Nat) : IO Unit := do
+  let G := pathGraph n
+  let gv : Fin n := ⟨goal % n, Nat.mod_lt _ hn⟩
+  let mut s : hsearch_search_state G.toWeightedDiGraph :=
+    WeightedDiGraph.base_search_state_initial ⟨0, hn⟩ (0, 0)
+  let mut t ← IO.monoNanosNow
+  for i in [0:maxSteps] do
+    let r := WeightedDiGraph.search_stack_step (G := G.toWeightedDiGraph) (D := ℕ × ℕ)
+      (hsearch_step_expand_gen G h_zero) gv s
+    s := r.1
+    let c := checksum s (firstVerts n (i + 2))
+    let t1 ← IO.monoNanosNow
+    IO.println s!"  gen step {i}: visited={s.visited.card}, checksum={c}, {(t1 - t) / 1000} µs"
+    (← IO.getStdout).flush
+    t := t1
+    if r.2.isSome then break
+
+/-- Experiment 6: wall-clock time of every individual expansion, for the closure-based state
+and for the flattened hash-map state.  The closure-based per-step time grows with the number
+of steps already performed; the flattened one stays essentially flat.
+
+Measured (one machine, one run; the `checksum` columns agree, as they must):
+
+| step | closure state | flattened state |
+|-----:|--------------:|----------------:|
+|   13 |         55 µs |          190 µs |
+|   43 |        784 µs |          116 µs |
+|   73 |       1472 µs |          229 µs |
+|  103 |       3630 µs |          309 µs |
+|  148 |      10044 µs |          160 µs | -/
+def perStepTiming : IO Unit := do
+  IO.println "== Experiment 6: time of each individual expansion (|V| = 4096, 150 steps) =="
+  stepTimesGen 4096 (by norm_num) 3000 150
+  stepTimesMap 4096 (by norm_num) 3000 150
+
+/-- Time one generator-based and one flattened multi-goal search (goal predicate
+`isGoalAt n depth`) on the path graph `Fin n`. -/
+def timeMultiGenVsMap (n : Nat) (hn : 0 < n) (depth : Nat) : IO Unit := do
+  let t0 ← IO.monoNanosNow
+  let rg := foundPath (dijkstra_multigoal_gen (pathGraph n) ⟨0, hn⟩ (isGoalAt n depth))
+  let t1 ← IO.monoNanosNow
+  let rm := foundPath (dijkstra_multigoal_map (pathGraph n) ⟨0, hn⟩ (isGoalAt n depth))
+  let t2 ← IO.monoNanosNow
+  IO.println s!"  depth={depth}: gen found={rg}, {(t1 - t0) / 1000} µs   map found={rm}, {(t2 - t1) / 1000} µs"
+  (← IO.getStdout).flush
+
+/-- Experiment 7: the same comparison as Experiment 5, but for the **multi-goal** searches
+(goal given by a predicate), which run on the augmented graph over `Option (Fin n)`.  Both
+columns return the same result (`dijkstra_multigoal_map_eq_gen`).
+
+Measured (one machine, one run):
+
+| goal depth | `dijkstra_multigoal_gen` | `dijkstra_multigoal_map` |
+|-----------:|-------------------------:|-------------------------:|
+|         40 |                    14 ms |                   3.3 ms |
+|         80 |                   144 ms |                   5.3 ms |
+|        160 |                  1559 ms |                    26 ms | -/
+def multiGoalFlattenedScaling : IO Unit := do
+  IO.println "== Experiment 7: multi-goal, closure state (gen) vs flattened state (map) =="
+  IO.println "   (non-branching path, |V| = 4096, goal predicate at increasing depth)"
+  timeMultiGenVsMap 4096 (by norm_num) 40
+  timeMultiGenVsMap 4096 (by norm_num) 80
+  timeMultiGenVsMap 4096 (by norm_num) 160
+
+def mapOnly : IO Unit := do
+  IO.println "== map-only scaling =="
+  let mut t ← IO.monoNanosNow
+  for d in [80, 160, 320, 640, 1280] do
+    let r := foundPath (dijkstra_map (pathGraph 4096) ⟨0, by norm_num⟩ ⟨d % 4096, Nat.mod_lt _ (by norm_num)⟩)
+    t ← timeStep s!"map depth={d}" r t
+
+
+def mainOld : IO Unit := do
   expandScaling
   IO.println ""
   vertexScaling
@@ -257,3 +424,105 @@ def main : IO Unit := do
   hugeGraph
   IO.println ""
   multiGoalScaling
+  IO.println ""
+  flattenedStateScaling
+  IO.println ""
+  perStepTiming
+  IO.println ""
+  multiGoalFlattenedScaling
+
+/-! ## Micro-benchmarks of the data-structure operations used per expansion -/
+
+def microFinsetUnion (n : Nat) : IO Unit := do
+  let t0 ← IO.monoNanosNow
+  let mut s : Finset (Fin 4096) := ∅
+  for i in [0:n] do
+    let v : Fin 4096 := ⟨i % 4096, Nat.mod_lt _ (by norm_num)⟩
+    s := s ∪ [v].toFinset
+  let t1 ← IO.monoNanosNow
+  IO.println s!"  finset-union n={n}: card={s.card}, {(t1 - t0) / 1000} µs"
+
+def microFinsetMem (n : Nat) : IO Unit := do
+  let mut s : Finset (Fin 4096) := ∅
+  for i in [0:n] do
+    let v : Fin 4096 := ⟨i % 4096, Nat.mod_lt _ (by norm_num)⟩
+    s := insert v s
+  let t0 ← IO.monoNanosNow
+  let mut c := 0
+  for i in [0:n] do
+    let v : Fin 4096 := ⟨i % 4096, Nat.mod_lt _ (by norm_num)⟩
+    if v ∈ s then c := c + 1
+  let t1 ← IO.monoNanosNow
+  IO.println s!"  finset-mem n={n}: hits={c}, {(t1 - t0) / 1000} µs"
+
+def microHashSet (n : Nat) : IO Unit := do
+  let t0 ← IO.monoNanosNow
+  let mut s : Std.HashSet (Fin 4096) := ∅
+  for i in [0:n] do
+    let v : Fin 4096 := ⟨i % 4096, Nat.mod_lt _ (by norm_num)⟩
+    s := s.insert v
+  let mut c := 0
+  for i in [0:n] do
+    let v : Fin 4096 := ⟨i % 4096, Nat.mod_lt _ (by norm_num)⟩
+    if s.contains v then c := c + 1
+  let t1 ← IO.monoNanosNow
+  IO.println s!"  hashset n={n}: hits={c}, {(t1 - t0) / 1000} µs"
+
+def microMain : IO Unit := do
+  for n in [100, 200, 400, 800, 1600] do
+    microFinsetUnion n
+    microFinsetMem n
+    microHashSet n
+
+def fastOnly : IO Unit := do
+  IO.println "== map vs fast vs sorted scaling =="
+  for d in [80, 160, 320, 640, 1280, 2560] do
+    let mut t ← IO.monoNanosNow
+    let rm := foundPath (dijkstra_map (pathGraph 4096) ⟨0, by norm_num⟩ ⟨d % 4096, Nat.mod_lt _ (by norm_num)⟩)
+    t ← timeStep s!"map    depth={d}" rm t
+    let rf := foundPath (dijkstra_fast (pathGraph 4096) ⟨0, by norm_num⟩ ⟨d % 4096, Nat.mod_lt _ (by norm_num)⟩)
+    t ← timeStep s!"fast   depth={d}" rf t
+    let rs := foundPath (dijkstra_sorted (pathGraph 4096) ⟨0, by norm_num⟩ ⟨d % 4096, Nat.mod_lt _ (by norm_num)⟩)
+    let _ ← timeStep s!"sorted depth={d}" rs t
+
+/-- Per-step timing of the fast state, without any extra work per step. -/
+def stepTimesFast (n : Nat) (hn : 0 < n) (goal : Nat) (maxSteps : Nat) : IO Unit := do
+  let G := pathGraph n
+  let gv : Fin n := ⟨goal % n, Nat.mod_lt _ hn⟩
+  let mut s : hsearch_fast_state (Fin n) := hsearch_fast_state.initial ⟨0, hn⟩ (0, 0)
+  let mut t ← IO.monoNanosNow
+  for i in [0:maxSteps] do
+    let r := WeightedDiGraph.search_stack_step (G := G.toWeightedDiGraph) (D := ℕ × ℕ)
+      (hsearch_step_expand_fast G h_zero) gv s
+    s := r.1
+    if i % 200 == 199 then
+      let t1 ← IO.monoNanosNow
+      IO.println s!"  fast steps {i-199}..{i}: {(t1 - t) / 1000} µs"
+      (← IO.getStdout).flush
+      t := t1
+    if r.2.isSome then break
+
+/-- Per-step timing of the sorted state, without any extra work per step. -/
+def stepTimesSorted (n : Nat) (hn : 0 < n) (goal : Nat) (maxSteps : Nat) : IO Unit := do
+  let G := pathGraph n
+  let gv : Fin n := ⟨goal % n, Nat.mod_lt _ hn⟩
+  let mut s : hsearch_sorted_state (Fin n) h_zero :=
+    hsearch_sorted_state.initial h_zero ⟨0, hn⟩ (0, 0)
+  let mut t ← IO.monoNanosNow
+  for i in [0:maxSteps] do
+    let r := WeightedDiGraph.search_stack_step (G := G.toWeightedDiGraph) (D := ℕ × ℕ)
+      (hsearch_step_expand_sorted G h_zero) gv s
+    s := r.1
+    if i % 200 == 199 then
+      let t1 ← IO.monoNanosNow
+      IO.println s!"  sorted steps {i-199}..{i}: {(t1 - t) / 1000} µs (counts={s.counts.size}, queue={s.stack.length}, order={s.orderMap.size})"
+      (← IO.getStdout).flush
+      t := t1
+    if r.2.isSome then break
+
+def main : IO Unit := do
+  fastOnly
+  IO.println "== per-step timing, fast state, path graph =="
+  stepTimesFast 8192 (by norm_num) 7000 3000
+  IO.println "== per-step timing, sorted state, path graph =="
+  stepTimesSorted 8192 (by norm_num) 7000 3000
