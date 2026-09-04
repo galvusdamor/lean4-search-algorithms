@@ -35,3 +35,11 @@ root = "BenchHeapLazy"
 [[lean_exe]]
 name = "benchpath"
 root = "BenchPath"
+
+[[lean_exe]]
+name = "benchcache"
+root = "BenchCache"
+
+[[lean_exe]]
+name = "benchmemo"
+root = "BenchMemo"
