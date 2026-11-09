@@ -412,14 +412,20 @@ def hsearch_stored_itemsOfFast (vis : VisitedSet V) (om : Std.HashMap V (ℕ × 
         (if vo = no then mm.getD v md else hd)
       else hd
     let ht : Thunk ℕ∞ := Thunk.mk (fun _ => heur v)
+    -- the cost comparison first: it usually fails, and then no lookup in `qm` is needed
     let isNew : Bool :=
-      (!isVisited || ((!qm.contains v) && decide (vo.fst > hdo.fst + c))) &&
+      (!isVisited || (decide (vo.fst > hdo.fst + c) && (!qm.contains v))) &&
         decide (ht.get ≠ ⊤)
     ((v, no, nm, isNew), ht))
 
 omit [LawfulBEq V] in
 @[csimp] theorem hsearch_stored_itemsOf_eq_fast :
-    @hsearch_stored_itemsOf = @hsearch_stored_itemsOfFast := rfl
+    @hsearch_stored_itemsOf = @hsearch_stored_itemsOfFast := by
+  funext V _ _ _ G heur vis om od mm md hd qm
+  unfold hsearch_stored_itemsOf hsearch_stored_itemsOfFast
+  refine List.map_congr_left (fun x _ => ?_)
+  simp only [Bool.and_comm (!qm.contains _)]
+  rfl
 
 omit [LawfulBEq V] in
 theorem hsearch_stored_itemsOf_map (vis : VisitedSet V) (om : Std.HashMap V (ℕ × ℕ))
