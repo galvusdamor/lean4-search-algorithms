@@ -456,6 +456,38 @@ expensive, and prefer `ofChunked` (or `ofArray` if one cell per vertex can be af
 keeps the lookup at the cost of two array indexings while still allocating only for the part
 of the graph the search touches.
 
+## Storing the `f`-value in the queue
+
+A cache treats the symptom.  `SearchAlgorithms/HeapLazyStored.lean` removes the cause: in
+`astar_heap_stored_fastpath` (and `astar_multigoal_heap_stored_fastpath`) a heap entry **stores
+its `f`-value**, computed once when the entry is created, and the heap compares the stored
+values.  The heuristic of a neighbour is a `Thunk` that is forced only if the neighbour enters
+the queue, so it is evaluated **at most once per queue insertion** — never by a comparison and
+never for a neighbour that is already closed — and no cache is needed.  This matters when the
+vertex type is too large for an array cache: on the `n`-bit states of a planning task the
+16-way trie allocates about `n / 4` nodes per state, tens of kilobytes, whereas the stored
+search keeps the memory of the uncached one.
+
+Correctness is transferred by a simulation: forgetting the stored values
+(`hsearch_stored_state.erase`) maps a state onto a state of the lazy heap search, the heap
+operations commute with it as long as the comparison functions agree on the stored elements
+(`SearchAlgorithms/LHeapMap.lean`: `LHeap.map_merge`, `map_foldl_insert`, `map_deleteMin`,
+`HeapQueue.map_purge`), and purging, expanding and the step function commute with `erase`.
+`astar_heap_stored_fastpath_eq_lazy` — the search returns the same path as
+`astar_heap_lazy_fastpath`, hence as `astar`.
+
+One detail is easy to miss: the search loop reads the *base state* of the final state to
+reconstruct the path, and a strictly evaluated base state computes its queue.  Sorted with the
+comparison of `hsearch_lazy_state`, that alone is `O(m log m)` heuristic evaluations at the end
+of every search, so the stored state's base state sorts by the stored values
+(`hsearch_stored_state.storedQueue`, `storedQueue_eq`).
+
+Measured in the planner of `lean4-planner` (A\* with `h^max` on grounded IPC tasks, one core):
+`blocks/probBLOCKS-7-0` 18.0 s / 1.1 GB with the 16-way trie cache, 5.1 s / 87 MB with stored
+values; `tpp/p05` and `gripper/prob04` time out after 120 s with the cache (at 1.0 and 1.4 GB)
+and are solved in 4.0 s and 16.6 s with stored values.  The number of heuristic evaluations is
+the same as with the cache — one per distinct state.
+
 ## Dependency Graph
 
 ![Dependency graph](dependencies.svg)
