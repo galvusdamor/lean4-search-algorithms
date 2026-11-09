@@ -217,7 +217,7 @@ theorem liveQueue_eq_cons_of_live (le : α → α → Bool)
 /-- Drop the entries at the root of the heap until the root is live (or the heap is empty).
 Every entry is dropped at most once during the whole search, so this costs `O(log m)`
 amortised. -/
-def purge (le : α → α → Bool) (p : α × ℕ → Bool) (h : LHeap (α × ℕ)) : LHeap (α × ℕ) :=
+@[specialize] def purge (le : α → α → Bool) (p : α × ℕ → Bool) (h : LHeap (α × ℕ)) : LHeap (α × ℕ) :=
   match hpk : h.peek with
   | none => h
   | some x =>

@@ -61,6 +61,24 @@ def storedKeyLe (a b : StoredKey V) : Bool := a.2 = b.2 || FValueComp.lt a.2 b.2
 /-- The heap order: by stored `f`-value, ties broken by the insertion number. -/
 abbrev storedLe : StoredEntry V → StoredEntry V → Bool := List.zipIdxLE storedKeyLe
 
+/-- `storedLe` as one lexicographic comparison of natural numbers: stored `f`-value, its
+tie-breaking component, then the insertion number (`storedLe_eq_fast`). -/
+def storedLeFast (a b : StoredEntry V) : Bool :=
+  let x := a.1.2
+  let y := b.1.2
+  x.1 < y.1 || (x.1 == y.1 && (x.2 < y.2 || (x.2 == y.2 && a.2 ≤ b.2)))
+
+omit [FinEnum V] [BEq V] [LawfulBEq V] [Hashable V] in
+@[csimp] theorem storedLe_eq_fast : @storedLe = @storedLeFast := by
+  funext V a b
+  obtain ⟨⟨k, x1, x2⟩, i⟩ := a
+  obtain ⟨⟨k', y1, y2⟩, j⟩ := b
+  simp only [storedLe, List.zipIdxLE, storedKeyLe, storedLeFast, FValueComp.lt,
+    Nat.FValueLT]
+  simp only [Prod.lex_def, Prod.mk.injEq, Bool.or_eq_true, decide_eq_true_eq]
+  by_cases h1 : x1 < y1 <;> by_cases h2 : x1 = y1 <;> by_cases h3 : x2 < y2 <;>
+    by_cases h4 : x2 = y2 <;> simp [h1, h2, h3, h4] <;> omega
+
 /-- Forget the stored value of an entry. -/
 abbrev eraseEntry : StoredEntry V → LazyEntry V := HeapQueue.entryMap Prod.fst
 
@@ -367,6 +385,41 @@ def hsearch_stored_itemsOf (vis : VisitedSet V) (om : Std.HashMap V (ℕ × ℕ)
             decide ((ps.pathOrder v).fst > (ps.pathOrder hd).fst + g.edgeCost adj))) &&
         decide (ht.get ≠ ⊤)
     ((v, no, nm, isNew), ht))
+
+/-- `hsearch_stored_itemsOf` with its common subterms shared: the path order of the expanded
+vertex is looked up once per expansion, and the path order of a neighbour and the cost of the
+edge once per neighbour (the reference version rebuilds the abstract state and repeats these
+lookups inside `new_cost` and `path_val`).  It is the same function (`rfl`), installed with
+`@[csimp]`. -/
+def hsearch_stored_itemsOfFast (vis : VisitedSet V) (om : Std.HashMap V (ℕ × ℕ)) (od : ℕ × ℕ)
+    (mm : Std.HashMap V V) (md : V) (hd : V) (qm : Std.HashMap V ℕ) :
+    List ((V × ((ℕ × ℕ) × V × Bool)) × Thunk ℕ∞) :=
+  let g : NatGraph V := G.toWeightedDiGraph
+  let hdo : ℕ × ℕ := om.getD hd od
+  (G.neighbours hd).attach.map (fun x =>
+    let v : V := x.1
+    let adj : g.Adj hd v := (G.neighbours_are_adj hd v).mpr x.2
+    let c : ℕ := g.edgeCost adj
+    let pv : ℕ × ℕ := ⟨hdo.fst + c, hdo.snd + 1⟩
+    let isVisited : Bool := vis.hashSet.contains v
+    let vo : ℕ × ℕ := om.getD v od
+    let no : ℕ × ℕ :=
+      if isVisited then
+        (if vo.1 < pv.1 then vo else if vo.1 = pv.1 ∧ vo.2 < pv.2 then vo else pv)
+      else pv
+    let nm : V :=
+      if isVisited then
+        (if vo = no then mm.getD v md else hd)
+      else hd
+    let ht : Thunk ℕ∞ := Thunk.mk (fun _ => heur v)
+    let isNew : Bool :=
+      (!isVisited || ((!qm.contains v) && decide (vo.fst > hdo.fst + c))) &&
+        decide (ht.get ≠ ⊤)
+    ((v, no, nm, isNew), ht))
+
+omit [LawfulBEq V] in
+@[csimp] theorem hsearch_stored_itemsOf_eq_fast :
+    @hsearch_stored_itemsOf = @hsearch_stored_itemsOfFast := rfl
 
 omit [LawfulBEq V] in
 theorem hsearch_stored_itemsOf_map (vis : VisitedSet V) (om : Std.HashMap V (ℕ × ℕ))
@@ -690,9 +743,11 @@ def hsearch_stored_core (s : hsearch_stored_state V heur) (root : StoredEntry V)
     match qt[x.1.1]? with
     | none => none
     | some n =>
-      if x.1.2.1 == om.getD x.1.1 od then none
-      else some (((x.1.1, x.1.2.1), addH x.1.2.1 x.2.get),
-        (((x.1.1, om.getD x.1.1 od), addH (om.getD x.1.1 od) x.2.get), n)))
+      let ov := om.getD x.1.1 od
+      if x.1.2.1 == ov then none
+      else
+        let hv := x.2.get
+        some (((x.1.1, x.1.2.1), addH x.1.2.1 hv), (((x.1.1, ov), addH ov hv), n)))
   let changedKeys : List (StoredKey V) :=
     (changedPairs.mergeSort (fun a b => storedLe a.2 b.2)).map Prod.fst
   let pushEntries : List (StoredEntry V) := (changedKeys ++ newlyKeys).zipIdx ns

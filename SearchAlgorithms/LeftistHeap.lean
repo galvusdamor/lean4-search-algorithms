@@ -102,7 +102,7 @@ theorem Ordered_mkNode (le : α → α → Bool) (x : α) (a b : LHeap α)
     exact hx y ((List.perm_append_comm (l₁ := b.elems) (l₂ := a.elems)).subset hy)
 
 /-- Merge two heaps. -/
-def merge (le : α → α → Bool) : LHeap α → LHeap α → LHeap α
+@[specialize] def merge (le : α → α → Bool) : LHeap α → LHeap α → LHeap α
   | nil, h => h
   | h, nil => h
   | node k₁ x l₁ r₁, node k₂ y l₂ r₂ =>
@@ -189,7 +189,7 @@ theorem Ordered_merge (le : α → α → Bool)
 termination_by h₁ h₂ => h₁.size + h₂.size
 
 /-- Insert an element. -/
-def insert (le : α → α → Bool) (h : LHeap α) (x : α) : LHeap α :=
+@[specialize] def insert (le : α → α → Bool) (h : LHeap α) (x : α) : LHeap α :=
   merge le (node 1 x nil nil) h
 
 theorem elems_insert (le : α → α → Bool) (h : LHeap α) (x : α) :
@@ -239,7 +239,7 @@ def peek : LHeap α → Option α
   | node _ x _ _ => some x
 
 /-- Remove the minimum. -/
-def deleteMin (le : α → α → Bool) : LHeap α → LHeap α
+@[specialize] def deleteMin (le : α → α → Bool) : LHeap α → LHeap α
   | nil => nil
   | node _ _ l r => merge le l r
 
