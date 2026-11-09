@@ -63,7 +63,7 @@ abbrev storedLe : StoredEntry V → StoredEntry V → Bool := List.zipIdxLE stor
 
 /-- `storedLe` as one lexicographic comparison of natural numbers: stored `f`-value, its
 tie-breaking component, then the insertion number (`storedLe_eq_fast`). -/
-def storedLeFast (a b : StoredEntry V) : Bool :=
+@[inline] def storedLeFast (a b : StoredEntry V) : Bool :=
   let x := a.1.2
   let y := b.1.2
   x.1 < y.1 || (x.1 == y.1 && (x.2 < y.2 || (x.2 == y.2 && a.2 ≤ b.2)))
