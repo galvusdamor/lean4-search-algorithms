@@ -55,3 +55,6 @@ import SearchAlgorithms.SearchExeFast
 import SearchAlgorithms.AStarHeapLazyPath
 import SearchAlgorithms.AStarSortedPath
 import SearchAlgorithms.DijkstraAllNodesPath
+import SearchAlgorithms.LazyMemo
+import SearchAlgorithms.HeuristicCache
+import SearchAlgorithms.AStarCached
