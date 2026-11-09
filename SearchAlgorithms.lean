@@ -58,3 +58,5 @@ import SearchAlgorithms.DijkstraAllNodesPath
 import SearchAlgorithms.LazyMemo
 import SearchAlgorithms.HeuristicCache
 import SearchAlgorithms.AStarCached
+import SearchAlgorithms.LHeapMap
+import SearchAlgorithms.HeapLazyStored
