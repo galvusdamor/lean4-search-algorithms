@@ -62,6 +62,17 @@ structure WeightedDiGraphWithGenerator (V : Type) (E : Type) [FinEnum V]
   /-- Each neighbour list is an ordered sublist of the `FinEnum` enumeration of `V`. -/
   neighbours_sublist : ∀ u : V,
     (neighbours u).Sublist (FinEnum.toList (Finset.univ : Finset V))
+  /-- The out-neighbours of a vertex together with the labels of the edges to them.  By
+  default the labels are read off `Payload`; a generator that knows the labels while it
+  produces the neighbours (for example, the cost of the operator that leads to a successor
+  state) can supply them directly, so the search does not have to recompute them. -/
+  neighboursE : V → List (V × E) := fun u =>
+    (neighbours u).attach.map (fun x =>
+      (x.1, toWeightedDiGraph.Payload u x.1 ((neighbours_are_adj u x.1).mpr x.2)))
+  /-- `neighboursE` lists `neighbours` with the edge labels. -/
+  neighboursE_eq : ∀ u : V, neighboursE u = (neighbours u).attach.map (fun x =>
+      (x.1, toWeightedDiGraph.Payload u x.1 ((neighbours_are_adj u x.1).mpr x.2))) := by
+    intro u; rfl
 
 /-- Every vertex occurs in the (coerced) `FinEnum` enumeration of all vertices. -/
 theorem WeightedDiGraph.mem_coe_toList_univ {V : Type} [FinEnum V] (v : V) :
@@ -88,6 +99,26 @@ def WeightedDiGraph.toWithGenerator {V E : Type} [FinEnum V]
     simp only [List.mem_filter, decide_eq_true_eq]
     exact ⟨fun h => ⟨WeightedDiGraph.mem_coe_toList_univ v, h⟩, fun h => h.2⟩
   neighbours_sublist u := List.filter_sublist
+/-- A list of labelled elements of `ns`, in the order of `ns`, whose labels are given by `f`, is
+the attached `ns` labelled by `f`.  (Used to supply `neighboursE`.) -/
+theorem List.eq_attach_map_of {α β : Type} (ns : List α) (f : (x : α) → x ∈ ns → β)
+    (l : List (α × β)) (h1 : l.map Prod.fst = ns)
+    (h2 : ∀ x ∈ l, ∀ h : x.1 ∈ ns, f x.1 h = x.2) :
+    l = ns.attach.map (fun x => (x.1, f x.1 x.2)) := by
+  have hlen : l.length = ns.length := by rw [← h1, List.length_map]
+  apply List.ext_getElem (by simp [hlen])
+  intro i hi hi'
+  have hfst : (l[i]).1 = ns[i]'(hlen ▸ hi) := by
+    have := congrArg (fun m => m[i]?) h1
+    simp only [List.getElem?_map, List.getElem?_eq_getElem hi,
+      List.getElem?_eq_getElem (hlen ▸ hi), Option.map_some] at this
+    exact Option.some.inj this
+  simp only [List.getElem_map, List.getElem_attach]
+  refine Prod.ext hfst ?_
+  have hm : (l[i]).1 ∈ ns := hfst ▸ List.getElem_mem _
+  rw [← h2 l[i] (List.getElem_mem _) hm]
+  congr 1 <;> simp [hfst]
+
 -- def local global variable for a graph
 variable {V : Type} {E : Type} [FinEnum V] --[DecidableEq V] [DecidableEq E]
 variable {G : WeightedDiGraph V E}

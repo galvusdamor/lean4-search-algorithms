@@ -111,6 +111,44 @@ theorem augNeighbours_sublist (G : NatGraphWithGenerator V) (is_goal : V → Pro
         · exact List.Sublist.refl [none]
         · exact List.nil_sublist [none]
 
+/-- The labelled neighbours of the augmentation: those of the original graph, and the
+artificial edge of cost `0` from a goal. -/
+def augNeighboursE (G : NatGraphWithGenerator V) (is_goal : V → Prop) [DecidablePred is_goal] :
+    Option V → List (Option V × ℕ)
+  | none => []
+  | some u => (G.neighboursE u).map (fun x => (some x.1, x.2)) ++
+      (if is_goal u then [(none, 0)] else [])
+
+theorem augNeighboursE_eq (G : NatGraphWithGenerator V) (is_goal : V → Prop)
+    [DecidablePred is_goal] (a : Option V) :
+    augNeighboursE G is_goal a = (augNeighbours G is_goal a).attach.map (fun x =>
+      (x.1, (add_artificial_goal G.toWeightedDiGraph is_goal).Payload a x.1
+        ((augNeighbours_are_adj G is_goal a x.1).mpr x.2))) := by
+  refine List.eq_attach_map_of (augNeighbours G is_goal a)
+    (fun v hv => (add_artificial_goal G.toWeightedDiGraph is_goal).Payload a v
+      ((augNeighbours_are_adj G is_goal a v).mpr hv)) _ ?_ ?_
+  · cases a with
+    | none => rfl
+    | some u =>
+      simp only [augNeighboursE, augNeighbours, List.map_append, List.map_map, G.neighboursE_eq]
+      congr 1
+      · simp [Function.comp_def]
+      · split <;> rfl
+  · intro x hx h
+    cases a with
+    | none => simp [augNeighboursE] at hx
+    | some u =>
+      simp only [augNeighboursE, List.mem_append, List.mem_map] at hx
+      rcases hx with ⟨y, hy, rfl⟩ | hx
+      · rw [G.neighboursE_eq, List.mem_map] at hy
+        obtain ⟨z, -, rfl⟩ := hy
+        rfl
+      · split at hx
+        · simp only [List.mem_singleton] at hx
+          subst hx
+          rfl
+        · simp at hx
+
 /-- The artificial-goal augmentation of a *generator* graph for a goal predicate `is_goal`.
 
 The underlying weighted digraph is exactly `add_artificial_goal` (so downstream results
@@ -122,6 +160,8 @@ def add_artificial_goal_gen (G : NatGraphWithGenerator V)
   neighbours := augNeighbours G is_goal
   neighbours_are_adj := augNeighbours_are_adj G is_goal
   neighbours_sublist := augNeighbours_sublist G is_goal
+  neighboursE := augNeighboursE G is_goal
+  neighboursE_eq := augNeighboursE_eq G is_goal
 
 /-- The underlying weighted digraph of the generator augmentation is the enumeration-based
 augmentation. -/

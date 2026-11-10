@@ -396,10 +396,9 @@ def hsearch_stored_itemsOfFast (vis : VisitedSet V) (om : Std.HashMap V (ℕ × 
     List ((V × ((ℕ × ℕ) × V × Bool)) × Thunk ℕ∞) :=
   let g : NatGraph V := G.toWeightedDiGraph
   let hdo : ℕ × ℕ := om.getD hd od
-  (G.neighbours hd).attach.map (fun x =>
+  (G.neighboursE hd).map (fun x =>
     let v : V := x.1
-    let adj : g.Adj hd v := (G.neighbours_are_adj hd v).mpr x.2
-    let c : ℕ := g.edgeCost adj
+    let c : ℕ := x.2
     let pv : ℕ × ℕ := ⟨hdo.fst + c, hdo.snd + 1⟩
     let isVisited : Bool := vis.hashSet.contains v
     let vo : ℕ × ℕ := om.getD v od
@@ -423,6 +422,7 @@ omit [LawfulBEq V] in
     @hsearch_stored_itemsOf = @hsearch_stored_itemsOfFast := by
   funext V _ _ _ G heur vis om od mm md hd qm
   unfold hsearch_stored_itemsOf hsearch_stored_itemsOfFast
+  rw [G.neighboursE_eq, List.map_map]
   refine List.map_congr_left (fun x _ => ?_)
   simp only [Bool.and_comm (!qm.contains _)]
   rfl
