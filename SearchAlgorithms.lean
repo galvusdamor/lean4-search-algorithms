@@ -60,3 +60,6 @@ import SearchAlgorithms.HeuristicCache
 import SearchAlgorithms.AStarCached
 import SearchAlgorithms.LHeapMap
 import SearchAlgorithms.HeapLazyStored
+import SearchAlgorithms.BucketQueue
+import SearchAlgorithms.SearchSimRel
+import SearchAlgorithms.HeapLazyBucket
