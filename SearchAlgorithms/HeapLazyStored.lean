@@ -492,8 +492,8 @@ def hsearch_stored_newQueued : Std.HashMap V ℕ :=
 
 /-- The heap after the expansion. -/
 def hsearch_stored_newHeap : LHeap (StoredEntry V) :=
-  (hsearch_stored_pushEntries G heur s head qt).foldl (LHeap.insert storedLe)
-    (LHeap.deleteMin storedLe s.heap)
+  LHeap.insertAll storedLe (LHeap.deleteMin storedLe s.heap)
+    (hsearch_stored_pushEntries G heur s head qt)
 
 /-- The updated path-order map. -/
 def hsearch_stored_orderMap : Std.HashMap V (ℕ × ℕ) :=
@@ -662,7 +662,7 @@ theorem hsearch_stored_newHeap_map :
         rw [← hh] at this
         exact s.heap_keys e this
     · exact hsearch_stored_pushEntries_ok G heur s head qt e h
-  rw [LHeap.map_foldl_insert _ _ _ _ _ (storedLe_agree heur _ hok),
+  rw [LHeap.map_insertAll _ _ _ _ _ (storedLe_agree heur _ hok),
     LHeap.map_deleteMin _ _ _ _ (storedLe_agree heur _ s.heap_keys),
     hsearch_stored_pushEntries_map]
   rfl
@@ -672,7 +672,7 @@ theorem hsearch_stored_newHeap_ok :
     ∀ e ∈ (hsearch_stored_newHeap G heur s head qt).elems, KeyOk heur e.1 := by
   intro e he
   unfold hsearch_stored_newHeap at he
-  rcases List.mem_append.mp ((LHeap.elems_foldl_insert _ _ _).mem_iff.mp he) with h | h
+  rcases List.mem_append.mp ((LHeap.elems_insertAll _ _ _).mem_iff.mp he) with h | h
   · cases hh : s.heap with
     | nil => rw [hh] at h; simp [LHeap.deleteMin] at h
     | node k x l r =>
@@ -759,7 +759,7 @@ def hsearch_stored_core (s : hsearch_stored_state V heur) (root : StoredEntry V)
   let pushEntries : List (StoredEntry V) := (changedKeys ++ newlyKeys).zipIdx ns
   let newQueued : Std.HashMap V ℕ := pushEntries.foldl (fun m e => m.insert e.1.1.1 e.2) qt
   let newHeap : LHeap (StoredEntry V) :=
-    pushEntries.foldl (LHeap.insert storedLe) (LHeap.deleteMin storedLe heap0)
+    LHeap.insertAll storedLe (LHeap.deleteMin storedLe heap0) pushEntries
   let newOrderMap := items.foldl (fun m x => m.insert x.1.1 x.1.2.1) om
   let newMotherMap := items.foldl (fun m x => m.insert x.1.1 x.1.2.2.1) mm
   let newVis := vis0.insertList newly

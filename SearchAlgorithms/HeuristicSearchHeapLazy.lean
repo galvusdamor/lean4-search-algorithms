@@ -393,7 +393,7 @@ state, so — unlike for the eagerly updated heap — this needs nothing but the
 insertion and `deleteMin` preserve the invariant. -/
 theorem hsearch_lazy_newHeap_ordered :
     LHeap.Ordered (hsearch_lazy_le heur) (hsearch_lazy_newHeap G heur s head qt) :=
-  LHeap.Ordered_foldl_insert _ (hsearch_lazy_le_total heur) (hsearch_lazy_le_trans heur) _ _
+  LHeap.Ordered_insertAll _ (hsearch_lazy_le_total heur) (hsearch_lazy_le_trans heur) _ _
     (LHeap.Ordered_deleteMin _ (hsearch_lazy_le_total heur) (hsearch_lazy_le_trans heur)
       s.heap s.heap_ordered)
 
@@ -436,7 +436,7 @@ omit [LawfulBEq V] in
 theorem hsearch_lazy_newHeap_perm (qt : Std.HashMap V ℕ) :
     (hsearch_lazy_newHeap G heur s root.1.1 qt).elems.Perm
       (T ++ hsearch_lazy_pushEntries G heur s root.1.1 qt) := by
-  refine (LHeap.elems_foldl_insert _ _ _).trans ?_
+  refine (LHeap.elems_insertAll _ _ _).trans ?_
   exact (hsearch_lazy_deleteMin_perm heur s root T hp hT).append_right _
 
 omit [LawfulBEq V] in

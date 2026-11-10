@@ -183,8 +183,8 @@ def hsearch_expand_lazy_core (s : hsearch_lazy_state V heur) (root : LazyEntry V
   let pushEntries : List (LazyEntry V) := (changedKeys ++ newlyKeys).zipIdx ns
   let newQueued : Std.HashMap V ℕ := pushEntries.foldl (fun m e => m.insert e.1.1 e.2) qt
   let newHeap : LHeap (LazyEntry V) :=
-    pushEntries.foldl (LHeap.insert (hsearch_lazy_le heur))
-      (LHeap.deleteMin (hsearch_lazy_le heur) heap0)
+    LHeap.insertAll (hsearch_lazy_le heur) (LHeap.deleteMin (hsearch_lazy_le heur) heap0)
+      pushEntries
   let newOrderMap := items.foldl (fun m x => m.insert x.1 x.2.1) om
   let newMotherMap := items.foldl (fun m x => m.insert x.1 x.2.2.1) mm
   let newVis := vis0.insertList newly

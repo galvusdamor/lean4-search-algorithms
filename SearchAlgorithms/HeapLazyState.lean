@@ -413,8 +413,8 @@ def hsearch_lazy_replace (e : LazyEntry V) : LazyEntry V :=
 
 /-- The heap after the expansion: the root is removed and the new entries are inserted. -/
 def hsearch_lazy_newHeap : LHeap (LazyEntry V) :=
-  (hsearch_lazy_pushEntries G heur s head qt).foldl (LHeap.insert (hsearch_lazy_le heur))
-    (LHeap.deleteMin (hsearch_lazy_le heur) s.heap)
+  LHeap.insertAll (hsearch_lazy_le heur) (LHeap.deleteMin (hsearch_lazy_le heur) s.heap)
+    (hsearch_lazy_pushEntries G heur s head qt)
 
 end
 

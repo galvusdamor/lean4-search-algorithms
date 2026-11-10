@@ -233,6 +233,21 @@ theorem Ordered_ofList (le : α → α → Bool)
     Ordered le (ofList le l) :=
   Ordered_foldl_insert le total trans l nil (by simp)
 
+/-- **Insert all elements of a list at once**: build a heap of them and merge it into `h`
+(one merge along the spine of `h` instead of one per element). -/
+@[specialize] def insertAll (le : α → α → Bool) (h : LHeap α) (l : List α) : LHeap α :=
+  merge le (ofList le l) h
+
+theorem elems_insertAll (le : α → α → Bool) (h : LHeap α) (l : List α) :
+    (insertAll le h l).elems.Perm (h.elems ++ l) :=
+  (elems_merge le _ h).trans (((elems_ofList le l).append_right _).trans List.perm_append_comm)
+
+theorem Ordered_insertAll (le : α → α → Bool)
+    (total : ∀ a b, (le a b || le b a) = true)
+    (trans : ∀ a b c, le a b → le b c → le a c) (h : LHeap α) (l : List α)
+    (hh : Ordered le h) : Ordered le (insertAll le h l) :=
+  Ordered_merge le total trans _ _ (Ordered_ofList le total trans l) hh
+
 /-- The minimum of the heap, if any. -/
 def peek : LHeap α → Option α
   | nil => none

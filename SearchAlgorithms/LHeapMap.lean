@@ -109,6 +109,23 @@ theorem map_foldl_insert (le' : α → α → Bool) (le : β → β → Bool) (f
         · simp
         · simp [hz]))]
 
+theorem map_insertAll (le' : α → α → Bool) (le : β → β → Bool) (f : α → β) (h : LHeap α)
+    (l : List α) (hag : Agree le' le f (h.elems ++ l)) :
+    map f (insertAll le' h l) = insertAll le (map f h) (l.map f) := by
+  unfold insertAll ofList
+  rw [map_merge le' le f _ _ (hag.mono (by
+      intro z hz
+      rcases List.mem_append.mp hz with hz | hz
+      · have := (elems_foldl_insert le' l nil).mem_iff.mp hz
+        simp only [elems_nil, List.nil_append] at this
+        exact List.mem_append_right _ this
+      · exact List.mem_append_left _ hz)),
+    map_foldl_insert le' le f l nil (hag.mono (by
+      intro z hz
+      simp only [elems_nil, List.nil_append] at hz
+      exact List.mem_append_right _ hz))]
+  rfl
+
 theorem map_deleteMin (le' : α → α → Bool) (le : β → β → Bool) (f : α → β) (h : LHeap α)
     (hag : Agree le' le f h.elems) : map f (deleteMin le' h) = deleteMin le (map f h) := by
   cases h with
