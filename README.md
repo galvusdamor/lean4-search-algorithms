@@ -488,6 +488,42 @@ values; `tpp/p05` and `gripper/prob04` time out after 120 s with the cache (at 1
 and are solved in 4.0 s and 16.6 s with stored values.  The number of heuristic evaluations is
 the same as with the cache — one per distinct state.
 
+## A bucket queue, one map, and labelled neighbours
+
+Three further changes make an expansion of the stored search cheaper; each is proved not to
+change the result.
+
+* **Labelled neighbours.**  `WeightedDiGraphWithGenerator` has a field `neighboursE` (with the
+  proof obligation `neighboursE_eq`): the neighbours of a vertex together with the labels of the
+  edges to them.  Its default reads the labels off `Payload`; a generator that knows the costs
+  while it produces the successors supplies them, and the stored search reads the edge costs
+  from it instead of evaluating `Payload` per neighbour.
+* **A bucket queue** (`SearchAlgorithms/BucketQueue.lean`).  The queue entries are ordered by
+  their key and, among equal keys, by their insertion number, and insertion numbers increase.
+  So a queue with one FIFO bucket per key — the buckets of one `f`-value sorted by key, and
+  indexed by `f` in an array (`RQ`) — pops them in the same order as the heap, without walking
+  the spines of a tree.  Its invariant (`RQ.WF`) makes its entries the *sorted list* of a heap
+  with the same entries (`HeapQueue.sortedList`), which does not depend on the shape of the
+  heap; `peek`, `pop` and `insert` act on that list as the heap operations do.
+* **One map** (`SearchAlgorithms/HeapLazyInfo.lean`).  Path order, mother and visitedness of a
+  vertex are in one hash map, read with one lookup per neighbour and written only for the
+  neighbours whose entries change; the visited set is a list that is only read for the
+  abstract state.
+
+The states of this search (`hsearch_bi_state`) cannot be mapped onto those of the heap search
+(a bucket queue does not determine a heap), so the transfer goes along a **relation**
+(`SearchAlgorithms/SearchSimRel.lean`, `search_exe_with_stack_step_sim_rel`): a state is related
+to a stored state if the visited vertices are the same, the map gives the same path orders,
+mothers and visitedness as the stored maps, and the queue holds the sorted list of the heap.
+Purging, expanding and the step preserve the relation (`biPurge_rel`, `biCore_rel`,
+`biExpand_rel`), so `astar_bi_fastpath_eq_stored`: the search returns the same path as
+`astar_heap_stored_fastpath`, which it replaces through `@[csimp]` (also for the multi-goal
+search).  `SearchAlgorithms/HeapLazyBucket.lean` is the intermediate step with the bucket queue
+and the two maps (`astar_bq_fastpath`).
+
+In the planner of `lean4-planner` (blind search, one core) this made the search about 2–2.5×
+faster than on the leftist heap with the two maps, at about 20% less memory.
+
 ## Dependency Graph
 
 ![Dependency graph](dependencies.svg)
