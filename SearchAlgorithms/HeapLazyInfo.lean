@@ -23,11 +23,18 @@ open SearchAlgorithms
 
 variable {V : Type} [FinEnum V] [BEq V] [LawfulBEq V] [Hashable V]
 
-/-- The data of a state: that of a bucket queue state, with one map for path orders and
-mothers. -/
+/-- What the search knows about a vertex: its path order, its mother, and whether it has been
+visited. -/
+structure BInfo (V : Type) where
+  order : ℕ × ℕ
+  mother : V
+  visited : Bool
+
+/-- The data of a state: that of a bucket queue state, with one map for path orders, mothers
+and visitedness, and the visited vertices in a list (only read for the abstract state). -/
 structure hsearch_bi_data (V : Type) [BEq V] [Hashable V] [FinEnum V] (heur : V → ℕ∞) where
-  vis : VisitedSet V
-  info : Std.HashMap V ((ℕ × ℕ) × V)
+  visList : List V
+  info : Std.HashMap V (BInfo V)
   orderDefault : ℕ × ℕ
   motherDefault : V
   queue : RQ (StoredEntry V)
@@ -40,11 +47,13 @@ variable {heur : V → ℕ∞}
 
 /-- **The relation to a stored state.** -/
 structure BIRel (d : hsearch_bi_data V heur) (s : hsearch_stored_state V heur) : Prop where
-  vis : d.vis = s.vis
+  visMem : ∀ v, v ∈ d.visList ↔ v ∈ s.vis.toFinset
+  visNodup : d.visList.Nodup
   od : d.orderDefault = s.orderDefault
   md : d.motherDefault = s.motherDefault
-  info : ∀ v, d.info.getD v (s.orderDefault, s.motherDefault)
-    = (s.orderMap.getD v s.orderDefault, s.motherMap.getD v s.motherDefault)
+  info : ∀ v, d.info.getD v ⟨s.orderDefault, s.motherDefault, false⟩
+    = ⟨s.orderMap.getD v s.orderDefault, s.motherMap.getD v s.motherDefault,
+        s.vis.hashSet.contains v⟩
   queued : d.queued = s.queued
   ns : d.nextSeq = s.nextSeq
   ex : d.expansions = s.expansions
@@ -64,9 +73,9 @@ def biPurge (d : hsearch_bi_data V heur) : hsearch_bi_data V heur :=
 omit [LawfulBEq V] in
 theorem biPurge_rel {d : hsearch_bi_data V heur} {s : hsearch_stored_state V heur}
     (h : BIRel d s) : BIRel (biPurge d) (hsearch_stored_purgeState heur s) := by
-  obtain ⟨h1, h2, h3, h4, h5, h6, h7, h8, hwf, he⟩ := h
+  obtain ⟨h0, h1, h2, h3, h4, h5, h6, h7, h8, hwf, he⟩ := h
   obtain ⟨w1, w2⟩ := purgeQ_spec (storedIsLive d.queued) d.queue hwf
-  refine ⟨h1, h2, h3, h4, h5, h6, h7, h8, w1, ?_⟩
+  refine ⟨h0, h1, h2, h3, h4, h5, h6, h7, h8, w1, ?_⟩
   show RQ.elems (purgeQ (storedIsLive d.queued) d.queue) = HeapQueue.sortedList storedKeyLe
     (HeapQueue.purge storedKeyLe (storedIsLive s.queued) s.heap)
   rw [w2, he, h5, sortedList_purge _ s.heap (stored_ordered s) (stored_nodup s)]
@@ -92,6 +101,7 @@ structure BItem (V : Type) where
   ht : Thunk ℕ∞
   changed : Bool
   vo : ℕ × ℕ
+  wasVis : Bool
 
 /-- The data in the form of `hsearch_stored_itemsOf`. -/
 @[inline] def BItem.toStored {V : Type} (x : BItem V) : (V × ((ℕ × ℕ) × V × Bool)) × Thunk ℕ∞ :=
@@ -103,36 +113,37 @@ variable (G : NatGraphWithGenerator V) (heur : V → ℕ∞)
 
 /-- The per-neighbour data of `hsearch_stored_itemsOfFast` in one record, with two more
 components: whether the entry of the neighbour changes, and its old path order. -/
-def biItemsOf (vis : VisitedSet V) (info : Std.HashMap V ((ℕ × ℕ) × V)) (od : ℕ × ℕ) (md : V)
+def biItemsOf (info : Std.HashMap V (BInfo V)) (od : ℕ × ℕ) (md : V)
     (hd : V) (qm : Std.HashMap V ℕ) : List (BItem V) :=
-  let hdo : ℕ × ℕ := (info.getD hd (od, md)).1
+  let dflt : BInfo V := ⟨od, md, false⟩
+  let hdo : ℕ × ℕ := (info.getD hd dflt).order
   (G.neighboursE hd).map (fun x =>
     let v : V := x.1
     let c : ℕ := x.2
     let pv : ℕ × ℕ := ⟨hdo.fst + c, hdo.snd + 1⟩
-    let isVisited : Bool := vis.hashSet.contains v
-    let vi : (ℕ × ℕ) × V := info.getD v (od, md)
-    let vo : ℕ × ℕ := vi.1
+    let vi : BInfo V := info.getD v dflt
+    let isVisited : Bool := vi.visited
+    let vo : ℕ × ℕ := vi.order
     let no : ℕ × ℕ :=
       if isVisited then
         (if vo.1 < pv.1 then vo else if vo.1 = pv.1 ∧ vo.2 < pv.2 then vo else pv)
       else pv
     let nm : V :=
       if isVisited then
-        (if vo = no then vi.2 else hd)
+        (if vo = no then vi.mother else hd)
       else hd
     let ht : Thunk ℕ∞ := Thunk.mk (fun _ => heur v)
     let isNew : Bool :=
       (!isVisited || (decide (vo.fst > hdo.fst + c) && (!qm.contains v))) &&
         decide (ht.get ≠ ⊤)
-    ⟨v, no, nm, isNew, ht, !isVisited || no != vo, vo⟩)
+    ⟨v, no, nm, isNew, ht, !isVisited || no != vo, vo, isVisited⟩)
 
 omit [LawfulBEq V] in
-theorem biItemsOf_map (vis : VisitedSet V) (info : Std.HashMap V ((ℕ × ℕ) × V))
+theorem biItemsOf_map (vis : VisitedSet V) (info : Std.HashMap V (BInfo V))
     (om : Std.HashMap V (ℕ × ℕ)) (od : ℕ × ℕ) (mm : Std.HashMap V V) (md : V)
-    (hinfo : ∀ v, info.getD v (od, md) = (om.getD v od, mm.getD v md)) (hd : V)
-    (qm : Std.HashMap V ℕ) :
-    (biItemsOf G heur vis info od md hd qm).map BItem.toStored
+    (hinfo : ∀ v, info.getD v ⟨od, md, false⟩ = ⟨om.getD v od, mm.getD v md, vis.hashSet.contains v⟩)
+    (hd : V) (qm : Std.HashMap V ℕ) :
+    (biItemsOf G heur info od md hd qm).map BItem.toStored
       = hsearch_stored_itemsOf G heur vis om od mm md hd qm := by
   rw [hsearch_stored_itemsOf_eq_fast]
   unfold biItemsOf hsearch_stored_itemsOfFast
@@ -141,28 +152,29 @@ theorem biItemsOf_map (vis : VisitedSet V) (info : Std.HashMap V ((ℕ × ℕ) �
   simp only [Function.comp_apply, BItem.toStored, hinfo]
 
 omit [LawfulBEq V] in
-theorem biItemsOf_spec (vis : VisitedSet V) (info : Std.HashMap V ((ℕ × ℕ) × V))
+theorem biItemsOf_spec (info : Std.HashMap V (BInfo V))
     (od : ℕ × ℕ) (md : V) (hd : V) (qm : Std.HashMap V ℕ) :
-    ∀ x ∈ biItemsOf G heur vis info od md hd qm,
-      x.vo = (info.getD x.v (od, md)).1 ∧
-        (x.changed = false → x.no = (info.getD x.v (od, md)).1 ∧
-          x.nm = (info.getD x.v (od, md)).2) := by
+    ∀ x ∈ biItemsOf G heur info od md hd qm,
+      x.vo = (info.getD x.v ⟨od, md, false⟩).order ∧
+        x.wasVis = (info.getD x.v ⟨od, md, false⟩).visited ∧
+        (x.changed = false → x.no = (info.getD x.v ⟨od, md, false⟩).order ∧
+          x.nm = (info.getD x.v ⟨od, md, false⟩).mother ∧ x.wasVis = true) := by
   intro x hx
   unfold biItemsOf at hx
   obtain ⟨y, -, rfl⟩ := List.mem_map.1 hx
-  refine ⟨rfl, ?_⟩
+  refine ⟨rfl, rfl, ?_⟩
   intro hc
   simp only [Bool.or_eq_false_iff, Bool.not_eq_false', bne_eq_false_iff_eq] at hc
   obtain ⟨hv, hno⟩ := hc
   simp only [hv, if_true] at hno ⊢
-  refine ⟨hno, ?_⟩
+  refine ⟨hno, ?_, trivial⟩
   rw [if_pos hno.symm]
 
 omit [LawfulBEq V] in
 /-- The keys of the per-neighbour data are distinct. -/
-theorem biItemsOf_nodup (vis : VisitedSet V) (info : Std.HashMap V ((ℕ × ℕ) × V))
+theorem biItemsOf_nodup (info : Std.HashMap V (BInfo V))
     (od : ℕ × ℕ) (md : V) (hd : V) (qm : Std.HashMap V ℕ) :
-    ((biItemsOf G heur vis info od md hd qm).map (fun x => x.v)).Nodup := by
+    ((biItemsOf G heur info od md hd qm).map (fun x => x.v)).Nodup := by
   unfold biItemsOf
   rw [List.map_map]
   have : ((G.neighboursE hd).map Prod.fst).Nodup := by
@@ -179,46 +191,122 @@ theorem biItemsOf_nodup (vis : VisitedSet V) (info : Std.HashMap V ((ℕ × ℕ)
 end
 
 omit [FinEnum V] in
-/-- Updating `info` only for the changed entries gives the lookups of updating both maps for
-all entries. -/
-theorem info_foldl {α : Type} (key : α → V) (no : α → ℕ × ℕ) (nm : α → V) (ch : α → Bool) :
-    ∀ (l : List α) (info : Std.HashMap V ((ℕ × ℕ) × V)) (om : Std.HashMap V (ℕ × ℕ))
-      (mm : Std.HashMap V V) (od : ℕ × ℕ) (md : V), (l.map key).Nodup →
-      (∀ v, info.getD v (od, md) = (om.getD v od, mm.getD v md)) →
-      (∀ x ∈ l, ch x = false → no x = om.getD (key x) od ∧ nm x = mm.getD (key x) md) →
-      ∀ v, (l.foldl (fun m x => if ch x then m.insert (key x) (no x, nm x) else m) info).getD
-          v (od, md)
-        = ((l.foldl (fun m x => m.insert (key x) (no x)) om).getD v od,
-           (l.foldl (fun m x => m.insert (key x) (nm x)) mm).getD v md)
-  | [], info, om, mm, od, md, _, hinv, _ => hinv
-  | y :: l, info, om, mm, od, md, hnd, hinv, hun => by
+/-- The value of a key after conditional insertions along a list with distinct keys: that of
+the element with the key, if it is inserted. -/
+theorem getD_foldl_cond {α β : Type} (key : α → V) (cond : α → Bool) (val : α → β) (d : β) :
+    ∀ (l : List α) (m : Std.HashMap V β), (l.map key).Nodup → ∀ v,
+      (l.foldl (fun m x => if cond x then m.insert (key x) (val x) else m) m).getD v d
+        = match l.find? (fun x => key x == v) with
+          | some x => if cond x then val x else m.getD v d
+          | none => m.getD v d
+  | [], m, _, v => rfl
+  | y :: l, m, hnd, v => by
     rw [List.map_cons, List.nodup_cons] at hnd
-    simp only [List.foldl_cons]
-    apply info_foldl key no nm ch l _ _ _ od md hnd.2
-    · intro v
+    rw [List.foldl_cons, getD_foldl_cond key cond val d l _ hnd.2 v, List.find?_cons]
+    by_cases hk : key y = v
+    · have hnone : l.find? (fun x => key x == v) = none := by
+        rw [List.find?_eq_none]
+        intro x hx hxv
+        simp only [beq_iff_eq] at hxv
+        exact hnd.1 (hk ▸ hxv ▸ List.mem_map_of_mem hx)
+      rw [hnone]
+      simp only [hk, beq_self_eq_true]
       split
-      · rw [Std.HashMap.getD_insert, Std.HashMap.getD_insert, Std.HashMap.getD_insert]
+      · rw [Std.HashMap.getD_insert, if_pos (by simp)]
+      · rfl
+    · have hk' : (key y == v) = false := by simpa using hk
+      rw [hk']
+      simp only
+      have hm : (if cond y then m.insert (key y) (val y) else m).getD v d = m.getD v d := by
         split
+        · rw [Std.HashMap.getD_insert, if_neg (by simpa using hk)]
         · rfl
-        · exact hinv v
-      · next hc =>
-        obtain ⟨h1, h2⟩ := hun y List.mem_cons_self (by simpa using hc)
-        rw [Std.HashMap.getD_insert, Std.HashMap.getD_insert]
-        split
-        · next hk =>
-          have hk' : key y = v := by simpa using hk
-          subst hk'
-          rw [hinv, h1, h2]
-        · exact hinv v
-    · intro x hx hc
-      obtain ⟨h1, h2⟩ := hun x (List.mem_cons_of_mem _ hx) hc
-      have hne : ¬ (key y == key x) = true := by
-        simp only [beq_iff_eq]
-        intro he
-        exact hnd.1 (he ▸ List.mem_map_of_mem hx)
-      rw [Std.HashMap.getD_insert, Std.HashMap.getD_insert, if_neg hne, if_neg hne]
-      exact ⟨h1, h2⟩
+      split <;> simp only [hm]
 
+omit [FinEnum V] in
+theorem getD_foldl_insert' {α β : Type} (key : α → V) (val : α → β) (d : β)
+    (l : List α) (m : Std.HashMap V β) (hnd : (l.map key).Nodup) (v : V) :
+    (l.foldl (fun m x => m.insert (key x) (val x)) m).getD v d
+      = match l.find? (fun x => key x == v) with
+        | some x => val x
+        | none => m.getD v d := by
+  have := getD_foldl_cond key (fun _ => true) val d l m hnd v
+  simp only [if_true] at this
+  exact this
+
+theorem filterMap_sublist_map {α β : Type} (p : α → Bool) (k : α → β) :
+    ∀ l : List α, (l.filterMap (fun x => if p x then some (k x) else none)).Sublist (l.map k)
+  | [] => List.Sublist.slnil
+  | x :: l => by
+    rw [List.filterMap_cons, List.map_cons]
+    split
+    · exact (filterMap_sublist_map p k l).cons _
+    · split at *
+      · rename_i h1 h2; cases h2; exact (filterMap_sublist_map p k l).cons_cons _
+      · rename_i h1 h2; cases h2
+
+/-- **The map after an expansion**: conditional updates of `info` give the lookups of the
+updated path order map, mother map and visited set. -/
+theorem info_step (I2 : List (BItem V)) (hnd : (I2.map (fun x => x.v)).Nodup)
+    (info : Std.HashMap V (BInfo V)) (om : Std.HashMap V (ℕ × ℕ)) (mm : Std.HashMap V V)
+    (vis : VisitedSet V) (od : ℕ × ℕ) (md : V)
+    (hinfo : ∀ v, info.getD v ⟨od, md, false⟩ = ⟨om.getD v od, mm.getD v md, vis.hashSet.contains v⟩)
+    (hw : ∀ x ∈ I2, x.wasVis = vis.hashSet.contains x.v)
+    (hu : ∀ x ∈ I2, x.changed = false →
+      x.no = om.getD x.v od ∧ x.nm = mm.getD x.v md ∧ x.wasVis = true) (v : V) :
+    (I2.foldl (fun m x => if x.changed then m.insert x.v ⟨x.no, x.nm, x.wasVis || x.isNew⟩ else m)
+        info).getD v ⟨od, md, false⟩
+      = ⟨(I2.foldl (fun m x => m.insert x.v x.no) om).getD v od,
+         (I2.foldl (fun m x => m.insert x.v x.nm) mm).getD v md,
+         (vis.insertList (I2.filterMap (fun x => if x.isNew then some x.v else none))).hashSet.contains
+           v⟩ := by
+  rw [getD_foldl_cond (fun x => x.v) (fun x => x.changed)
+      (fun x => (⟨x.no, x.nm, x.wasVis || x.isNew⟩ : BInfo V)) _ I2 info hnd v,
+    getD_foldl_insert' (fun x => x.v) (fun x => x.no) _ I2 om hnd v,
+    getD_foldl_insert' (fun x => x.v) (fun x => x.nm) _ I2 mm hnd v]
+  have hcon : (vis.insertList (I2.filterMap (fun x => if x.isNew then some x.v else none))).hashSet.contains v
+      = (vis.hashSet.contains v || decide (∃ x ∈ I2, x.isNew = true ∧ x.v = v)) := by
+    rw [VisitedSet.contains_eq, VisitedSet.contains_eq, VisitedSet.insertList_toFinset]
+    rw [Bool.eq_iff_iff]
+    simp only [decide_eq_true_eq, Bool.or_eq_true, Finset.mem_union, List.mem_toFinset,
+      List.mem_filterMap]
+    apply or_congr Iff.rfl
+    constructor
+    · rintro ⟨x, hx, he⟩
+      split at he
+      · next hn => cases he; exact ⟨x, hx, hn, rfl⟩
+      · cases he
+    · rintro ⟨x, hx, hn, rfl⟩
+      exact ⟨x, hx, by simp [hn]⟩
+  rw [hcon]
+  cases hf : I2.find? (fun x => x.v == v) with
+  | none =>
+    have hno : ¬ ∃ x ∈ I2, x.isNew = true ∧ x.v = v := by
+      rintro ⟨x, hx, -, rfl⟩
+      rw [List.find?_eq_none] at hf
+      exact hf x hx (by simp)
+    simp only [hinfo, hno, decide_false, Bool.or_false]
+  | some x =>
+    have hx : x ∈ I2 := List.mem_of_find?_eq_some hf
+    have hxv : x.v = v := by simpa using List.find?_some hf
+    have huniq : (∃ y ∈ I2, y.isNew = true ∧ y.v = v) ↔ x.isNew = true := by
+      constructor
+      · rintro ⟨y, hy, hn, hyv⟩
+        have : y = x := List.inj_on_of_nodup_map hnd hy hx (hyv.trans hxv.symm)
+        subst this; exact hn
+      · intro hn; exact ⟨x, hx, hn, hxv⟩
+    have hdec : decide (∃ y ∈ I2, y.isNew = true ∧ y.v = v) = x.isNew := by
+      rw [Bool.eq_iff_iff, decide_eq_true_eq, huniq]
+    rw [hdec]
+    simp only
+    by_cases hch : x.changed = true
+    · rw [if_pos hch, hw x hx, hxv]
+    · have hch' : x.changed = false := by simpa using hch
+      rw [if_neg hch]
+      obtain ⟨h3, h4, h5⟩ := hu x hx hch'
+      have hvv : vis.hashSet.contains x.v = true := by rw [← hw x hx, h5]
+      rw [hinfo, ← hxv, ← h3, ← h4, hvv]
+      rfl
 
 /-! ### One expansion -/
 
@@ -229,7 +317,7 @@ variable (G : NatGraphWithGenerator V) (heur : V → ℕ∞)
 /-- **One expansion** with one map for path orders and mothers. -/
 def biCore (d : hsearch_bi_data V heur) (root : StoredEntry V) : hsearch_bi_data V heur :=
   let head : V := root.1.1.1
-  let vis0 := d.vis
+  let vis0 := d.visList
   let info := d.info
   let od := d.orderDefault
   let md := d.motherDefault
@@ -239,8 +327,7 @@ def biCore (d : hsearch_bi_data V heur) (root : StoredEntry V) : hsearch_bi_data
   let ex := d.expansions
   let te := d.traceEvery
   let qt : Std.HashMap V ℕ := q0.erase head
-  let items := biItemsOf G heur vis0 info od md head qt
-  let newly : List V := items.filterMap (fun x => if x.isNew then some x.v else none)
+  let items := biItemsOf G heur info od md head qt
   let newlyKeys : List (StoredKey V) := items.filterMap
     (fun x => if x.isNew then some ((x.v, x.no), addH x.no x.ht.get) else none)
   let changedPairs : List (StoredKey V × StoredEntry V) := items.filterMap (fun x =>
@@ -260,11 +347,11 @@ def biCore (d : hsearch_bi_data V heur) (root : StoredEntry V) : hsearch_bi_data
   let newQueued : Std.HashMap V ℕ := pushEntries.foldl (fun m e => m.insert e.1.1.1 e.2) qt
   let newHeap : RQ (StoredEntry V) := RQ.insertAll bkey (RQ.pop heap0) pushEntries
   let newInfo := items.foldl
-    (fun m x => if x.changed then m.insert x.v (x.no, x.nm) else m) info
-  let newVis := vis0.insertList newly
+    (fun m x => if x.changed then m.insert x.v ⟨x.no, x.nm, x.wasVis || x.isNew⟩ else m) info
+  let newVis := items.filterMap (fun x => if x.isNew && !x.wasVis then some x.v else none) ++ vis0
   traceIf (te != 0 && (ex + 1) % te == 0)
-    (fun _ => s!"[search] expanded {ex + 1} nodes | queue {newQueued.size} | visited {newVis.hashSet.size} | insertions {ns + pushEntries.length}")
-  { vis := newVis
+    (fun _ => s!"[search] expanded {ex + 1} nodes | queue {newQueued.size} | visited {newVis.length} | insertions {ns + pushEntries.length}")
+  { visList := newVis
     info := newInfo
     orderDefault := od
     motherDefault := md
@@ -296,16 +383,17 @@ theorem biCore_rel {d : hsearch_bi_data V heur} {s : hsearch_stored_state V heur
     (h : BIRel d s) (root : StoredEntry V) (hp : s.heap.peek = some root)
     (hlive : hsearch_lazy_isLive s.queued (eraseEntry root) = true) :
     BIRel (biCore G heur d root) (hsearch_stored_core G heur s root hp hlive) := by
-  obtain ⟨vis, info, od, md, q, qd, ns, ex, te⟩ := d
-  obtain ⟨hv, hod, hmd, hinfo, hq, hns, hex, hte, hwf, he⟩ := h
-  simp only at hv hod hmd hinfo hq hns hex hte hwf he
-  subst hv hod hmd hq hns hex hte
+  obtain ⟨vl, info, od, md, q, qd, ns, ex, te⟩ := d
+  obtain ⟨hvm, hvn, hod, hmd, hinfo, hq, hns, hex, hte, hwf, he⟩ := h
+  simp only at hvm hvn hod hmd hinfo hq hns hex hte hwf he
+  subst hod hmd hq hns hex hte
   set qt := s.queued.erase root.1.1.1 with hqt
-  set I2 := biItemsOf G heur s.vis info s.orderDefault s.motherDefault root.1.1.1 qt with hI2
+  set I2 := biItemsOf G heur info s.orderDefault s.motherDefault root.1.1.1 qt with hI2
   have hI : I2.map BItem.toStored = hsearch_stored_items G heur s root.1.1.1 qt :=
     biItemsOf_map G heur s.vis info s.orderMap s.orderDefault s.motherMap s.motherDefault hinfo
       root.1.1.1 qt
-  have hspec := biItemsOf_spec G heur s.vis info s.orderDefault s.motherDefault root.1.1.1 qt
+  have hspec := biItemsOf_spec G heur info s.orderDefault s.motherDefault root.1.1.1 qt
+  have hnd := biItemsOf_nodup G heur info s.orderDefault s.motherDefault root.1.1.1 qt
   have hnewly : I2.filterMap (fun x => if x.isNew then some x.v else none)
       = hsearch_stored_newly G heur s root.1.1.1 qt := by
     unfold hsearch_stored_newly; rw [← hI, List.filterMap_map]; rfl
@@ -326,7 +414,7 @@ theorem biCore_rel {d : hsearch_bi_data V heur} {s : hsearch_stored_state V heur
     rw [← hI, List.filterMap_map]
     apply List.filterMap_congr
     intro x hx
-    obtain ⟨h1, h2⟩ := hspec x hx
+    obtain ⟨h1, -, h2⟩ := hspec x hx
     have hov : x.vo = s.orderMap.getD x.v s.orderDefault := by rw [h1, hinfo]
     simp only [Function.comp_apply, BItem.toStored]
     cases hc : x.changed with
@@ -356,10 +444,11 @@ theorem biCore_rel {d : hsearch_bi_data V heur} {s : hsearch_stored_state V heur
         ++ hsearch_stored_newlyKeys G heur s root.1.1.1 qt := by
     rw [hchanged, hnewlyKeys]; rfl
   obtain ⟨f1, f2, f3, f4, f5, f6, f7, f8, f9⟩ := stored_core_fields G heur s root hp hlive
-  have hcore : biCore G heur ⟨s.vis, info, s.orderDefault, s.motherDefault, q, s.queued,
+  have hcore : biCore G heur ⟨vl, info, s.orderDefault, s.motherDefault, q, s.queued,
         s.nextSeq, s.expansions, s.traceEvery⟩ root
-      = ⟨s.vis.insertList (hsearch_stored_newly G heur s root.1.1.1 qt),
-         I2.foldl (fun m x => if x.changed then m.insert x.v (x.no, x.nm) else m) info,
+      = ⟨I2.filterMap (fun x => if x.isNew && !x.wasVis then some x.v else none) ++ vl,
+         I2.foldl (fun m x => if x.changed then m.insert x.v ⟨x.no, x.nm, x.wasVis || x.isNew⟩
+           else m) info,
          s.orderDefault, s.motherDefault,
          RQ.insertAll bkey (RQ.pop q) (hsearch_stored_pushEntries G heur s root.1.1.1 qt),
          hsearch_stored_newQueued G heur s root.1.1.1 qt,
@@ -367,7 +456,6 @@ theorem biCore_rel {d : hsearch_bi_data V heur} {s : hsearch_stored_state V heur
          s.expansions + 1, s.traceEvery⟩ := by
     unfold biCore
     simp only [traceIf_eq]
-    rw [hnewly]
     unfold hsearch_stored_newQueued hsearch_stored_pushEntries
     rw [← hpush]
   rw [hcore]
@@ -382,19 +470,73 @@ theorem biCore_rel {d : hsearch_bi_data V heur} {s : hsearch_stored_state V heur
     exact Nat.lt_of_lt_of_le (stored_seq_lt s x hx') (mem_zipIdx_ge _ _ y hy)
   obtain ⟨hperm, hwf'⟩ := RQ.elems_insertAll_WF _ (RQ.pop q) (RQ.WF_pop hwf) hlt
     (pairwise_zipIdx _ _)
-  refine ⟨f1.symm, f3.symm, f5.symm, ?_, f6.symm, f7.symm, f8.symm, f9.symm, hwf', ?_⟩
-  · intro v
-    rw [f2, f3, f4, f5]
+  -- the vertices of the new visited set
+  have hvis : ∀ v, v ∈ (s.vis.insertList (hsearch_stored_newly G heur s root.1.1.1 qt)).toFinset
+      ↔ v ∈ s.vis.toFinset ∨ ∃ x ∈ I2, x.isNew = true ∧ x.v = v := by
+    intro v
+    rw [VisitedSet.insertList_toFinset, Finset.mem_union, List.mem_toFinset, ← hnewly,
+      List.mem_filterMap]
+    apply or_congr Iff.rfl
+    constructor
+    · rintro ⟨x, hx, he⟩
+      split at he
+      · next hn => cases he; exact ⟨x, hx, hn, rfl⟩
+      · cases he
+    · rintro ⟨x, hx, hn, rfl⟩
+      exact ⟨x, hx, by simp [hn]⟩
+  have hwasVis : ∀ x ∈ I2, x.wasVis = decide (x.v ∈ s.vis.toFinset) := by
+    intro x hx
+    rw [(hspec x hx).2.1, hinfo, ← VisitedSet.contains_eq]
+  refine ⟨?_, ?_, f3.symm, f5.symm, ?_, f6.symm, f7.symm, f8.symm, f9.symm, hwf', ?_⟩
+  · -- visMem
+    intro v
+    rw [f1, hvis, List.mem_append, List.mem_filterMap, hvm]
+    constructor
+    · rintro (⟨x, hx, he⟩ | h)
+      · split at he
+        · next hn =>
+          cases he
+          simp only [Bool.and_eq_true, Bool.not_eq_true'] at hn
+          exact Or.inr ⟨x, hx, hn.1, rfl⟩
+        · cases he
+      · exact Or.inl h
+    · rintro (h | ⟨x, hx, hn, rfl⟩)
+      · exact Or.inr h
+      · by_cases hw : x.wasVis = true
+        · right
+          have := hwasVis x hx
+          rw [hw] at this
+          exact of_decide_eq_true this.symm
+        · left
+          exact ⟨x, hx, by simp [hn, hw]⟩
+  · -- visNodup
+    rw [List.nodup_append]
+    refine ⟨(filterMap_sublist_map _ _ I2).nodup hnd, hvn, ?_⟩
+    intro a ha b hb hab
+    subst hab
+    rw [List.mem_filterMap] at ha
+    obtain ⟨x, hx, he⟩ := ha
+    split at he
+    · next hn =>
+      cases he
+      simp only [Bool.and_eq_true, Bool.not_eq_true'] at hn
+      have := hwasVis x hx
+      rw [hn.2] at this
+      exact (of_decide_eq_false this.symm) ((hvm _).1 hb)
+    · cases he
+  · -- info
+    intro v
+    rw [f2, f3, f4, f5, f1, ← hnewly]
     unfold hsearch_stored_orderMap hsearch_stored_motherMap
     rw [← hI, List.foldl_map, List.foldl_map]
-    refine info_foldl (fun x => x.v) (fun x => x.no) (fun x => x.nm)
-      (fun x => x.changed) I2 info s.orderMap s.motherMap s.orderDefault s.motherDefault
-      (biItemsOf_nodup G heur _ _ _ _ _ _) hinfo ?_ v
-    intro x hx hc
-    obtain ⟨-, h2⟩ := hspec x hx
-    obtain ⟨h3, h4⟩ := h2 hc
-    rw [hinfo] at h3 h4
-    exact ⟨h3, h4⟩
+    refine info_step I2 hnd info s.orderMap s.motherMap s.vis s.orderDefault s.motherDefault hinfo
+      ?_ ?_ v
+    · intro x hx
+      rw [(hspec x hx).2.1, hinfo]
+    · intro x hx hc
+      obtain ⟨h3, h4, h5⟩ := (hspec x hx).2.2 hc
+      rw [hinfo] at h3 h4
+      exact ⟨h3, h4, h5⟩
   · rw [stored_core_heap]
     obtain ⟨t, ht⟩ := HeapQueue.sortedList_head storedKeyLe storedKeyLe_trans storedKeyLe_total
       s.heap root (stored_ordered s) (stored_nodup s) hp
@@ -455,25 +597,48 @@ section
 
 variable {heur : V → ℕ∞}
 
-@[reducible]
-def biToBase {g : NatGraph V} (d : hsearch_bi_data V heur) : hsearch_search_state g where
-  visited := d.vis.toFinset
-  pathOrder := fun v => (d.info.getD v (d.orderDefault, d.motherDefault)).1
-  mother := fun x => (d.info.getD x.1 (d.orderDefault, d.motherDefault)).2
-  stack := ((RQ.elems d.queue).filter (storedIsLive d.queued)).map (fun e => e.1.1.1)
+theorem bi_visNodup (s : hsearch_bi_state V heur) : s.1.visList.Nodup := by
+  obtain ⟨_, h⟩ := s.2; exact h.visNodup
 
-omit [LawfulBEq V] in
-theorem biToBase_eq {g : NatGraph V} {d : hsearch_bi_data V heur}
-    {s : hsearch_stored_state V heur} (h : BIRel d s) : biToBase (g := g) d = s.toBaseState := by
-  unfold biToBase hsearch_stored_state.toBaseState hsearch_stored_state.storedQueue
-  rw [h.vis, h.od, h.md, h.elems, h.queued]
-  congr 1
-  · funext v; rw [h.info]
-  · funext x; rw [h.info]
+@[reducible]
+def biToBase {g : NatGraph V} (s : hsearch_bi_state V heur) : hsearch_search_state g where
+  visited := ⟨s.1.visList, bi_visNodup s⟩
+  pathOrder := fun v => (s.1.info.getD v ⟨s.1.orderDefault, s.1.motherDefault, false⟩).order
+  mother := fun x => (s.1.info.getD x.1 ⟨s.1.orderDefault, s.1.motherDefault, false⟩).mother
+  stack := ((RQ.elems s.1.queue).filter (storedIsLive s.1.queued)).map (fun e => e.1.1.1)
+
+omit [LawfulBEq V] [BEq V] [Hashable V] in
+theorem base_state_ext {g : NatGraph V} (a b : hsearch_search_state g)
+    (h1 : a.visited = b.visited) (h2 : a.pathOrder = b.pathOrder)
+    (h3 : ∀ x (hx : x ∈ a.visited) (hx' : x ∈ b.visited), a.mother ⟨x, hx⟩ = b.mother ⟨x, hx'⟩)
+    (h4 : a.stack = b.stack) : a = b := by
+  obtain ⟨va, pa, ma, sa⟩ := a
+  obtain ⟨vb, pb, mb, sb⟩ := b
+  simp only at h1 h2 h3 h4
+  subst h1 h2 h4
+  congr
+  funext ⟨x, hx⟩
+  exact h3 x hx hx
+
+theorem biToBase_eq {g : NatGraph V} {s : hsearch_bi_state V heur}
+    {st : hsearch_stored_state V heur} (h : BIRel s.1 st) :
+    biToBase (g := g) s = st.toBaseState := by
+  apply base_state_ext
+  · ext v; exact h.visMem v
+  · funext v
+    show (s.1.info.getD v ⟨s.1.orderDefault, s.1.motherDefault, false⟩).order = _
+    rw [h.od, h.md, h.info]
+  · intro x _ _
+    show (s.1.info.getD x ⟨s.1.orderDefault, s.1.motherDefault, false⟩).mother = _
+    rw [h.od, h.md, h.info]
+  · show ((RQ.elems s.1.queue).filter (storedIsLive s.1.queued)).map (fun e => e.1.1.1)
+      = st.storedQueue
+    unfold hsearch_stored_state.storedQueue
+    rw [h.elems, h.queued]
 
 instance instHasBaseSearchStateBI (g : NatGraph V) (heur : V → ℕ∞) :
     WeightedDiGraph.has_base_search_state g (ℕ × ℕ) (hsearch_bi_state V heur) where
-  to_base_state := fun s => biToBase s.1
+  to_base_state := fun s => biToBase s
 
 theorem bi_to_base {g : NatGraph V} (s : hsearch_bi_state V heur)
     {st : hsearch_stored_state V heur} (h : BIRel s.1 st) :
@@ -530,7 +695,7 @@ theorem hsearch_bi_step_eq :
   obtain ⟨st, h⟩ := s.2
   have hpk := bi_peek_eq (biPurge_rel h)
   unfold hsearch_bi_step search_stack_step
-  show _ = (match (biToBase (g := G.toWeightedDiGraph) s.1).stack with
+  show _ = (match (biToBase (g := G.toWeightedDiGraph) s).stack with
     | [] => (s, some false)
     | x :: t => if x = goal then (s, some true)
         else (hsearch_step_expand_bi G heur s x t, none))
@@ -548,7 +713,7 @@ theorem hsearch_bi_step_eq :
     · rw [expand_bi_of_root G heur s root hq]
 
 def hsearch_bi_termination_metric (s : hsearch_bi_state V heur) : ℕ × ℕ × ℕ × ℕ :=
-  hsearch_termination_metric_nat (biToBase (g := G.toWeightedDiGraph) s.1)
+  hsearch_termination_metric_nat (biToBase (g := G.toWeightedDiGraph) s)
 
 theorem hsearch_bi_metric_eq (s : hsearch_bi_state V heur) {st : hsearch_stored_state V heur}
     (h : BIRel s.1 st) :
@@ -584,19 +749,25 @@ theorem hsearch_bi_expand_keeps_base_invars (start goal : V) :
   exact this
 
 theorem hsearch_bi_initial_spec (start : V) (d : ℕ × ℕ) (te : ℕ) :
-    BIRel ⟨VisitedSet.singleton start, ∅, d, start,
+    BIRel ⟨[start], (∅ : Std.HashMap V (BInfo V)).insert start ⟨d, start, true⟩, d, start,
       RQ.single bkey (((start, d), addH d (heur start)), 0), (∅ : Std.HashMap V ℕ).insert start 0,
       1, 0, te⟩ (hsearch_stored_state.initial heur start d te) := by
-  refine ⟨rfl, rfl, rfl, ?_, rfl, rfl, rfl, rfl,
+  refine ⟨?_, List.nodup_singleton _, rfl, rfl, ?_, rfl, rfl, rfl, rfl,
     (RQ.single_spec (key := bkey) (idx := bidx) (((start, d), addH d (heur start)), 0)).2, ?_⟩
   · intro v
-    simp [hsearch_stored_state.initial]
+    simp [hsearch_stored_state.initial, VisitedSet.singleton]
+  · intro v
+    simp only [hsearch_stored_state.initial, VisitedSet.singleton]
+    rw [Std.HashMap.getD_insert, Std.HashSet.contains_insert]
+    by_cases hv : start = v
+    · subst hv; simp
+    · simp [hv]
   · rw [(RQ.single_spec (key := bkey) (idx := bidx) (((start, d), addH d (heur start)), 0)).1]
     simp [HeapQueue.sortedList, hsearch_stored_state.initial]
 
 /-- The initial state: only `start` is queued. -/
 def hsearch_bi_initial (start : V) (d : ℕ × ℕ) (te : ℕ) : hsearch_bi_state V heur :=
-  ⟨⟨VisitedSet.singleton start, ∅, d, start,
+  ⟨⟨[start], (∅ : Std.HashMap V (BInfo V)).insert start ⟨d, start, true⟩, d, start,
       RQ.single bkey (((start, d), addH d (heur start)), 0), (∅ : Std.HashMap V ℕ).insert start 0,
       1, 0, te⟩, ⟨_, hsearch_bi_initial_spec heur start d te⟩⟩
 
