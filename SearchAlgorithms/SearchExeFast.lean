@@ -67,7 +67,7 @@ def search_exe_fast
     have mother_decreasing := search_returns_with_mother_decreasing decreasing_proof
       start_is_base_init invar_carries_over_step
 
-    some (extract_path_fast start goal (has_base_search_state.to_base_state final_state)
+    some (extract_path_fast start goal (noStack (has_base_search_state.to_base_state final_state))
       goal_in_final_visited mother_visited mother_adjacent mother_decreasing)
   else
     none
@@ -81,6 +81,7 @@ theorem search_exe_fast_eq
       = search_exe (start := start) (d := d) (expandable := expandable) decreasing_proof
         start_is_base_init invar_carries_over_step goal_on_stack_if_terminated := by
   unfold search_exe_fast search_exe
+  simp only [extract_path_fast_noStack]
   simp only [extract_path_fast_eq]
 
 end

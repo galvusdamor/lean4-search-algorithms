@@ -148,4 +148,41 @@ theorem extract_path_fast_eq (start : V) (goal : V) (s : base_search_state G D)
       goal_reached Walk.nil = _
   rw [extract_walk_fast_eq, Walk.append_nil]
 
+/-- The abstract state without its queue: path reconstruction does not read the queue, and a
+state whose queue is expensive to build (`to_base_state` of an implementation) need not
+build it for the reconstruction. -/
+@[inline] def noStack (s : base_search_state G D) : base_search_state G D :=
+  ⟨s.visited, s.pathOrder, s.mother, []⟩
+
+theorem extract_walk_fast_noStack (start : V) (goal : V) (s : base_search_state G D)
+    (mother_invar : search_invar_mother_is_visited s)
+    (mother_invar_adj : search_invar_mother_is_adjacent start s)
+    (decreasing_invar : search_invar_mother_decreasing_path_order start s)
+    (v : V) (hv : v ∈ s.visited) (acc : G.Walk v goal) :
+    extract_walk_fast start goal (noStack s) mother_invar mother_invar_adj decreasing_invar v hv
+        acc
+      = extract_walk_fast start goal s mother_invar mother_invar_adj decreasing_invar v hv acc := by
+  induction v, hv, acc using extract_walk_fast.induct start goal s mother_invar mother_invar_adj
+      decreasing_invar with
+  | case1 hv acc =>
+    rw [extract_walk_fast, extract_walk_fast]
+    simp only [dif_pos]
+  | case2 v hv acc hstart ih =>
+    rw [extract_walk_fast, extract_walk_fast, dif_neg hstart, dif_neg hstart]
+    exact ih
+
+/-- **Path reconstruction does not read the queue.** -/
+theorem extract_path_fast_noStack (start : V) (goal : V) (s : base_search_state G D)
+    (goal_reached : goal ∈ s.visited)
+    (mother_invar : search_invar_mother_is_visited s)
+    (mother_invar_adj : search_invar_mother_is_adjacent start s)
+    (decreasing_invar : search_invar_mother_decreasing_path_order start s) :
+    extract_path_fast start goal (noStack s) goal_reached mother_invar mother_invar_adj
+        decreasing_invar
+      = extract_path_fast start goal s goal_reached mother_invar mother_invar_adj
+        decreasing_invar := by
+  apply Subtype.ext
+  exact extract_walk_fast_noStack start goal s mother_invar mother_invar_adj decreasing_invar
+    goal goal_reached Walk.nil
+
 end WeightedDiGraph

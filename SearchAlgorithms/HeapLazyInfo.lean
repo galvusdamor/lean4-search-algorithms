@@ -600,7 +600,7 @@ variable {heur : V → ℕ∞}
 theorem bi_visNodup (s : hsearch_bi_state V heur) : s.1.visList.Nodup := by
   obtain ⟨_, h⟩ := s.2; exact h.visNodup
 
-@[reducible]
+@[reducible, inline]
 def biToBase {g : NatGraph V} (s : hsearch_bi_state V heur) : hsearch_search_state g where
   visited := ⟨s.1.visList, bi_visNodup s⟩
   pathOrder := fun v => (s.1.info.getD v ⟨s.1.orderDefault, s.1.motherDefault, false⟩).order
