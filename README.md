@@ -521,7 +521,7 @@ Purging, expanding and the step preserve the relation (`biPurge_rel`, `biCore_re
 search).  `SearchAlgorithms/HeapLazyBucket.lean` is the intermediate step with the bucket queue
 and the two maps (`astar_bq_fastpath`).
 
-In the planner of `lean4-planner` (blind search, one core) this made the search about 2–2.5×
+In the planner of `lean4-planner` (blind search, one core) this made the search about 1.5–2×
 faster than on the leftist heap with the two maps, at about 20% less memory.
 
 ## Dependency Graph
