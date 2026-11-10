@@ -49,7 +49,7 @@ def size : LHeap α → ℕ
 
 /-- The stored rank (length of the right spine); it is only used to keep the heap balanced,
 never in a correctness statement. -/
-def rank : LHeap α → ℕ
+@[inline] def rank : LHeap α → ℕ
   | nil => 0
   | node k _ _ _ => k
 
@@ -70,7 +70,7 @@ def elems : LHeap α → List α
 
 /-- Build a node from an element and two subheaps, putting the subheap of larger rank on the
 left (this is what keeps the right spine short). -/
-def mkNode (x : α) (a b : LHeap α) : LHeap α :=
+@[inline] def mkNode (x : α) (a b : LHeap α) : LHeap α :=
   if b.rank ≤ a.rank then node (b.rank + 1) x a b else node (a.rank + 1) x b a
 
 theorem elems_mkNode (x : α) (a b : LHeap α) :
