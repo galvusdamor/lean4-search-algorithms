@@ -493,15 +493,34 @@ def hsearch_step_expand_bq (s : hsearch_bq_state V heur) (_head : V) (_tail : Li
     obtain ⟨st, h⟩ := s.2
     exact ⟨_, bqExpand_rel G heur h _head _tail⟩⟩
 
+/-- The expansion of a state whose purged queue has the root `root`: `bqCore` on the purged
+data (it is `hsearch_step_expand_bq`, `expand_bq_of_root`). -/
+def hsearch_expand_bq_root (s : hsearch_bq_state V heur) (root : StoredEntry V)
+    (hq : (bqPurge s.1).queue.peek = some root) : hsearch_bq_state V heur :=
+  ⟨bqCore G heur (bqPurge s.1) root, by
+    obtain ⟨st, h⟩ := s.2
+    have := bqExpand_rel G heur h root.1.1.1 []
+    unfold bqExpand at this
+    rw [hq] at this
+    exact ⟨_, this⟩⟩
+
+theorem expand_bq_of_root (s : hsearch_bq_state V heur) (root : StoredEntry V)
+    (hq : (bqPurge s.1).queue.peek = some root) (head : V) (tail : List V) :
+    hsearch_expand_bq_root G heur s root hq = hsearch_step_expand_bq G heur s head tail := by
+  apply Subtype.ext
+  show bqCore G heur (bqPurge s.1) root = bqExpand G heur s.1
+  unfold bqExpand
+  rw [hq]
+
 /-- **The step function of the bucket queue search**: the next node is read off the queue. -/
 def hsearch_bq_step :
     search_step_function (G.toWeightedDiGraph) (ℕ × ℕ) (hsearch_bq_state V heur) :=
   fun goal s =>
-    match (bqPurge s.1).queue.peek with
+    match hq : (bqPurge s.1).queue.peek with
     | none => (s, some false)
     | some root =>
       if root.1.1.1 = goal then (s, some true)
-      else (hsearch_step_expand_bq G heur s root.1.1.1 [], none)
+      else (hsearch_expand_bq_root G heur s root hq, none)
 
 theorem hsearch_bq_step_eq :
     hsearch_bq_step G heur
@@ -518,15 +537,15 @@ theorem hsearch_bq_step_eq :
   have hst : (st.toBaseState (g := G.toWeightedDiGraph)).stack = st.erase.queue :=
     hsearch_stored_state.storedQueue_eq st
   rw [bqToBase_eq h, hst]
-  cases hq : (bqPurge s.1).queue.peek with
-  | none =>
+  split
+  · next hq =>
     rw [stored_queue_nil heur st (by rw [← hpk, hq])]
-  | some root =>
+  · next root hq =>
     rw [stored_queue_cons heur st root (by rw [← hpk, hq])]
     simp only
     split
     · rfl
-    · rfl
+    · rw [expand_bq_of_root G heur s root hq]
 
 /-- The termination metric: that of the abstract state. -/
 def hsearch_bq_termination_metric (s : hsearch_bq_state V heur) : ℕ × ℕ × ℕ × ℕ :=
@@ -620,8 +639,9 @@ theorem astar_bq_fastpath_eq_stored (start : V) (goal : V) (te : ℕ) :
 
 end
 
-/-- **The stored search runs on the bucket queue.** -/
-@[csimp] theorem astar_heap_stored_fastpath_eq_bq :
+/-- **The stored search runs on the bucket queue** (installed in `HeapLazyInfo` with the
+single map instead). -/
+theorem astar_heap_stored_fastpath_eq_bq :
     @astar_heap_stored_fastpath = @astar_bq_fastpath := by
   funext V _ _ _ _ G heur start goal te
   exact (astar_bq_fastpath_eq_stored G heur start goal te).symm
@@ -650,7 +670,7 @@ theorem astar_multigoal_bq_fastpath_eq_stored (start : V)
 end
 
 /-- **The multi-goal stored search runs on the bucket queue.** -/
-@[csimp] theorem astar_multigoal_heap_stored_fastpath_eq_bq :
+theorem astar_multigoal_heap_stored_fastpath_eq_bq :
     @astar_multigoal_heap_stored_fastpath = @astar_multigoal_bq_fastpath := by
   funext V _ _ _ _ G heur start is_goal _ te
   exact (astar_multigoal_bq_fastpath_eq_stored G heur start is_goal te).symm

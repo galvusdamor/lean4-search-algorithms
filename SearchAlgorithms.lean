@@ -63,3 +63,4 @@ import SearchAlgorithms.HeapLazyStored
 import SearchAlgorithms.BucketQueue
 import SearchAlgorithms.SearchSimRel
 import SearchAlgorithms.HeapLazyBucket
+import SearchAlgorithms.HeapLazyInfo
