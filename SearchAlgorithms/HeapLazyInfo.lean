@@ -98,14 +98,15 @@ structure BItem (V : Type) where
   no : ℕ × ℕ
   nm : V
   isNew : Bool
-  ht : Thunk ℕ∞
+  hv : ℕ∞
   changed : Bool
   vo : ℕ × ℕ
   wasVis : Bool
 
 /-- The data in the form of `hsearch_stored_itemsOf`. -/
-@[inline] def BItem.toStored {V : Type} (x : BItem V) : (V × ((ℕ × ℕ) × V × Bool)) × Thunk ℕ∞ :=
-  ((x.v, x.no, x.nm, x.isNew), x.ht)
+def BItem.toStored {V : Type} (heur : V → ℕ∞) (x : BItem V) :
+    (V × ((ℕ × ℕ) × V × Bool)) × Thunk ℕ∞ :=
+  ((x.v, x.no, x.nm, x.isNew), Thunk.mk (fun _ => heur x.v))
 
 section
 
@@ -132,24 +133,38 @@ def biItemsOf (info : Std.HashMap V (BInfo V)) (od : ℕ × ℕ) (md : V)
       if isVisited then
         (if vo = no then vi.mother else hd)
       else hd
-    let ht : Thunk ℕ∞ := Thunk.mk (fun _ => heur v)
+    let changed : Bool := !isVisited || no != vo
+    -- the heuristic is only read for a neighbour whose entry changes
+    let hv : ℕ∞ := if changed then heur v else ⊤
     let isNew : Bool :=
       (!isVisited || (decide (vo.fst > hdo.fst + c) && (!qm.contains v))) &&
-        decide (ht.get ≠ ⊤)
-    ⟨v, no, nm, isNew, ht, !isVisited || no != vo, vo, isVisited⟩)
+        decide (hv ≠ ⊤)
+    ⟨v, no, nm, isNew, hv, changed, vo, isVisited⟩)
 
 omit [LawfulBEq V] in
 theorem biItemsOf_map (vis : VisitedSet V) (info : Std.HashMap V (BInfo V))
     (om : Std.HashMap V (ℕ × ℕ)) (od : ℕ × ℕ) (mm : Std.HashMap V V) (md : V)
     (hinfo : ∀ v, info.getD v ⟨od, md, false⟩ = ⟨om.getD v od, mm.getD v md, vis.hashSet.contains v⟩)
     (hd : V) (qm : Std.HashMap V ℕ) :
-    (biItemsOf G heur info od md hd qm).map BItem.toStored
+    (biItemsOf G heur info od md hd qm).map (BItem.toStored heur)
       = hsearch_stored_itemsOf G heur vis om od mm md hd qm := by
   rw [hsearch_stored_itemsOf_eq_fast]
   unfold biItemsOf hsearch_stored_itemsOfFast
   rw [List.map_map]
   refine List.map_congr_left (fun x _ => ?_)
-  simp only [Function.comp_apply, BItem.toStored, hinfo]
+  simp only [Function.comp_apply, BItem.toStored, hinfo, Thunk.get]
+  congr 3
+  -- the heuristic is read where the reference reads it
+  cases hvis : vis.hashSet.contains x.1
+  · simp
+  · simp only [Bool.not_true, Bool.false_or, if_true]
+    by_cases hlt : (om.getD x.1 od).1 > (om.getD hd od).1 + x.2
+    · have hE : ¬ (om.getD x.1 od).1 = (om.getD hd od).1 + x.2 := by omega
+      have hP : ¬ (((om.getD hd od).1 + x.2, (om.getD hd od).2 + 1) = om.getD x.1 od) := by
+        intro h; rw [← h] at hlt; simp at hlt
+      have hle : (om.getD hd od).1 + x.2 ≤ (om.getD x.1 od).1 := by omega
+      simp [hlt, hE, hP, hle]
+    · simp [hlt]
 
 omit [LawfulBEq V] in
 theorem biItemsOf_spec (info : Std.HashMap V (BInfo V))
@@ -158,11 +173,19 @@ theorem biItemsOf_spec (info : Std.HashMap V (BInfo V))
       x.vo = (info.getD x.v ⟨od, md, false⟩).order ∧
         x.wasVis = (info.getD x.v ⟨od, md, false⟩).visited ∧
         (x.changed = false → x.no = (info.getD x.v ⟨od, md, false⟩).order ∧
-          x.nm = (info.getD x.v ⟨od, md, false⟩).mother ∧ x.wasVis = true) := by
+          x.nm = (info.getD x.v ⟨od, md, false⟩).mother ∧ x.wasVis = true) ∧
+        (x.changed = true → x.hv = heur x.v) ∧ (x.isNew = true → x.changed = true) := by
   intro x hx
   unfold biItemsOf at hx
   obtain ⟨y, -, rfl⟩ := List.mem_map.1 hx
-  refine ⟨rfl, rfl, ?_⟩
+  refine ⟨rfl, rfl, ?_, ?_, ?_⟩
+  rotate_left
+  · intro hc; simp only at hc ⊢; rw [if_pos hc]
+  · intro hn
+    simp only at hn ⊢
+    by_contra hc
+    rw [if_neg hc] at hn
+    simp at hn
   intro hc
   simp only [Bool.or_eq_false_iff, Bool.not_eq_false', bne_eq_false_iff_eq] at hc
   obtain ⟨hv, hno⟩ := hc
@@ -329,7 +352,7 @@ def biCore (d : hsearch_bi_data V heur) (root : StoredEntry V) : hsearch_bi_data
   let qt : Std.HashMap V ℕ := q0.erase head
   let items := biItemsOf G heur info od md head qt
   let newlyKeys : List (StoredKey V) := items.filterMap
-    (fun x => if x.isNew then some ((x.v, x.no), addH x.no x.ht.get) else none)
+    (fun x => if x.isNew then some ((x.v, x.no), addH x.no x.hv) else none)
   let changedPairs : List (StoredKey V × StoredEntry V) := items.filterMap (fun x =>
     if x.changed then
       match qt[x.v]? with
@@ -338,7 +361,7 @@ def biCore (d : hsearch_bi_data V heur) (root : StoredEntry V) : hsearch_bi_data
         let ov := x.vo
         if x.no == ov then none
         else
-          let hv := x.ht.get
+          let hv := x.hv
           some (((x.v, x.no), addH x.no hv), (((x.v, ov), addH ov hv), n))
     else none)
   let changedKeys : List (StoredKey V) :=
@@ -389,7 +412,7 @@ theorem biCore_rel {d : hsearch_bi_data V heur} {s : hsearch_stored_state V heur
   subst hod hmd hq hns hex hte
   set qt := s.queued.erase root.1.1.1 with hqt
   set I2 := biItemsOf G heur info s.orderDefault s.motherDefault root.1.1.1 qt with hI2
-  have hI : I2.map BItem.toStored = hsearch_stored_items G heur s root.1.1.1 qt :=
+  have hI : I2.map (BItem.toStored heur) = hsearch_stored_items G heur s root.1.1.1 qt :=
     biItemsOf_map G heur s.vis info s.orderMap s.orderDefault s.motherMap s.motherDefault hinfo
       root.1.1.1 qt
   have hspec := biItemsOf_spec G heur info s.orderDefault s.motherDefault root.1.1.1 qt
@@ -398,25 +421,32 @@ theorem biCore_rel {d : hsearch_bi_data V heur} {s : hsearch_stored_state V heur
       = hsearch_stored_newly G heur s root.1.1.1 qt := by
     unfold hsearch_stored_newly; rw [← hI, List.filterMap_map]; rfl
   have hnewlyKeys : I2.filterMap (fun x => if x.isNew then
-        some ((x.v, x.no), addH x.no x.ht.get) else none)
+        some ((x.v, x.no), addH x.no x.hv) else none)
       = hsearch_stored_newlyKeys G heur s root.1.1.1 qt := by
-    unfold hsearch_stored_newlyKeys; rw [← hI, List.filterMap_map]; rfl
+    unfold hsearch_stored_newlyKeys; rw [← hI, List.filterMap_map]
+    apply List.filterMap_congr
+    intro x hx
+    obtain ⟨-, -, -, h4, h5⟩ := hspec x hx
+    simp only [Function.comp_apply, BItem.toStored, Thunk.get]
+    by_cases hn : x.isNew = true
+    · rw [if_pos hn, if_pos hn, h4 (h5 hn)]
+    · rw [if_neg hn, if_neg hn]
   have hchanged : I2.filterMap (fun x =>
       if x.changed then
         match qt[x.v]? with
         | none => none
         | some n =>
           if x.no == x.vo then none
-          else some (((x.v, x.no), addH x.no x.ht.get),
-            (((x.v, x.vo), addH x.vo x.ht.get), n))
+          else some (((x.v, x.no), addH x.no x.hv),
+            (((x.v, x.vo), addH x.vo x.hv), n))
       else none) = hsearch_stored_changedPairs G heur s root.1.1.1 qt := by
     unfold hsearch_stored_changedPairs
     rw [← hI, List.filterMap_map]
     apply List.filterMap_congr
     intro x hx
-    obtain ⟨h1, -, h2⟩ := hspec x hx
+    obtain ⟨h1, -, h2, h4, -⟩ := hspec x hx
     have hov : x.vo = s.orderMap.getD x.v s.orderDefault := by rw [h1, hinfo]
-    simp only [Function.comp_apply, BItem.toStored]
+    simp only [Function.comp_apply, BItem.toStored, Thunk.get]
     cases hc : x.changed with
     | false =>
       obtain ⟨h3, -⟩ := h2 hc
@@ -427,7 +457,7 @@ theorem biCore_rel {d : hsearch_bi_data V heur} {s : hsearch_stored_state V heur
       · rw [if_pos (by simp [h3])]
     | true =>
       simp only [if_true]
-      rw [hov]
+      rw [hov, h4 hc]
       cases qt[x.v]? <;> rfl
   have hpush : ((I2.filterMap (fun x =>
       if x.changed then
@@ -435,11 +465,11 @@ theorem biCore_rel {d : hsearch_bi_data V heur} {s : hsearch_stored_state V heur
         | none => none
         | some n =>
           if x.no == x.vo then none
-          else some (((x.v, x.no), addH x.no x.ht.get),
-            (((x.v, x.vo), addH x.vo x.ht.get), n))
+          else some (((x.v, x.no), addH x.no x.hv),
+            (((x.v, x.vo), addH x.vo x.hv), n))
       else none)).mergeSort (fun a b => storedLe a.2 b.2)).map Prod.fst ++
       I2.filterMap (fun x => if x.isNew then
-        some ((x.v, x.no), addH x.no x.ht.get) else none)
+        some ((x.v, x.no), addH x.no x.hv) else none)
       = hsearch_stored_changedKeys G heur s root.1.1.1 qt
         ++ hsearch_stored_newlyKeys G heur s root.1.1.1 qt := by
     rw [hchanged, hnewlyKeys]; rfl
@@ -534,7 +564,7 @@ theorem biCore_rel {d : hsearch_bi_data V heur} {s : hsearch_stored_state V heur
     · intro x hx
       rw [(hspec x hx).2.1, hinfo]
     · intro x hx hc
-      obtain ⟨h3, h4, h5⟩ := (hspec x hx).2.2 hc
+      obtain ⟨h3, h4, h5⟩ := (hspec x hx).2.2.1 hc
       rw [hinfo] at h3 h4
       exact ⟨h3, h4, h5⟩
   · rw [stored_core_heap]
